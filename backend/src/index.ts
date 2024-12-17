@@ -56,16 +56,16 @@ const createProperty: RequestHandler = async (req, res) => {
   const client = await db.connect();
   
   try {
-    const { address, size, price, status, units } = req.body;
+    const { address, size, price, status, property_type, units } = req.body;
 
     await client.query('BEGIN');
     
     // Property erstellen
     const propertyResult = await client.query(
-      `INSERT INTO properties (address, size, price, status)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO properties (address, size, price, status, property_type)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [address, size, price, status]
+      [address, size, price, status, property_type]  // property_type als 5. Parameter
     );
 
     const propertyId = propertyResult.rows[0].id;
@@ -153,15 +153,15 @@ const updateProperty: RequestHandler = async (req, res) => {
 
     await client.query('BEGIN');
 
-    const { address, size, price, status, units } = req.body;
+    const { address, size, price, status, property_type, units } = req.body;
     
     // Update property
     const propertyResult = await client.query(
       `UPDATE properties 
-       SET address = $1, size = $2, price = $3, status = $4
-       WHERE id = $5 
+       SET address = $1, size = $2, price = $3, status = $4, property_type = $5
+       WHERE id = $6 
        RETURNING *`,
-      [address, size, price, status, id]
+      [address, size, price, status, property_type, id]  // property_type als 5. Parameter
     );
     
     if (propertyResult.rows.length === 0) {

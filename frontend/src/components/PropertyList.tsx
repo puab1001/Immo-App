@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -20,6 +19,7 @@ type Property = {
   size: number
   price: number
   status: string
+  property_type: string
   units: Unit[]
 }
 
@@ -83,7 +83,7 @@ export default function PropertyList() {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Immobilienverwaltung</h1>
         {properties.length > 0 && (
-          <Button 
+          <Button
             className="flex items-center gap-2"
             onClick={() => navigate('/new')}
           >
@@ -97,7 +97,7 @@ export default function PropertyList() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <p className="text-muted-foreground mb-4">Keine Immobilien vorhanden</p>
-            <Button 
+            <Button
               onClick={() => navigate('/new')}
               className="flex items-center gap-2"
             >
@@ -119,8 +119,8 @@ export default function PropertyList() {
                       onClick={() => toggleExpand(property.id)}
                       className="p-0 hover:bg-transparent"
                     >
-                      {expandedProperty === property.id ? 
-                        <ChevronUp className="w-4 h-4" /> : 
+                      {expandedProperty === property.id ?
+                        <ChevronUp className="w-4 h-4" /> :
                         <ChevronDown className="w-4 h-4" />
                       }
                     </Button>
@@ -147,15 +147,9 @@ export default function PropertyList() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div>
-                    <p className="text-sm text-gray-500">Größe</p>
-                    <p>{property.size} m²</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Preis</p>
-                    <p>{property.price} €</p>
-                  </div>
+                <div className="mb-4">
+                  <p className="text-sm text-gray-500">Art der Immobilie</p>
+                  <p>{property.property_type || 'Keine Angabe'}</p>
                 </div>
 
                 {/* Units Section */}

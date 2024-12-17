@@ -580,12 +580,12 @@ import Sidebar from './components/Sidebar'
 import PropertyList from './components/PropertyList'
 import NewPropertyForm from './components/PropertyForm'
 import EditPropertyForm from './components/EditPropertyForm'
-import { Providers } from './components/Providers'
+
 
 function App() {
   return (
     <BrowserRouter>
-      <Providers>
+    
         <Sidebar>
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -596,7 +596,7 @@ function App() {
             <Route path="/settings" element={<div className="text-lg">Einstellungen (Coming Soon)</div>} />
             </Routes>
         </Sidebar>
-      </Providers>
+     
     </BrowserRouter>
   )
 }
@@ -611,14 +611,12 @@ This is a file of the type: SVG Image
 # frontend/src/components/EditPropertyForm.tsx
 
 ```tsx
-// EditPropertyForm.tsx
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Plus, Trash, CheckCircle2 } from 'lucide-react'
+import { Plus, Trash } from 'lucide-react'
 
 interface Unit {
   id?: number
@@ -644,7 +642,6 @@ export default function EditPropertyForm() {
   const [property, setProperty] = useState<Property | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [showSuccess, setShowSuccess] = useState(false)
 
   useEffect(() => {
     const loadProperty = async () => {
@@ -703,28 +700,27 @@ export default function EditPropertyForm() {
     })
   }
 
-  // EditPropertyForm.tsx - Nur die handleSubmit Funktion muss geändert werden
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault()
-  if (!property) return
-  setIsSubmitting(true)
-  
-  try {
-    const response = await fetch(`http://localhost:3001/properties/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(property)
-    })
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!property) return
+    setIsSubmitting(true)
+    
+    try {
+      const response = await fetch(`http://localhost:3001/properties/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(property)
+      })
 
-    if (!response.ok) throw new Error(await response.text())
-    navigate('/properties?success=edit')
-  } catch (error) {
-    console.error('Fehler beim Speichern:', error)
-    alert('Fehler beim Aktualisieren der Immobilie')
-  } finally {
-    setIsSubmitting(false)
+      if (!response.ok) throw new Error(await response.text())
+      navigate('/properties')
+    } catch (error) {
+      console.error('Fehler beim Speichern:', error)
+      alert('Fehler beim Aktualisieren der Immobilie')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
-}
 
   if (isLoading) return <div>Lade...</div>
   if (!property) return <div>Immobilie nicht gefunden</div>
@@ -899,13 +895,10 @@ import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { CheckCircle2 } from "lucide-react"
 
 export default function PropertyForm() {
   const navigate = useNavigate()
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [showSuccess, setShowSuccess] = useState(false)
   const [property, setProperty] = useState({
     address: '',
     size: '',
@@ -929,10 +922,7 @@ export default function PropertyForm() {
       })
 
       if (response.ok) {
-        setShowSuccess(true)
-        setTimeout(() => {
-          navigate('/properties')
-        }, 1500)
+        navigate('/properties')
       } else {
         alert('Fehler beim Speichern der Immobilie')
       }
@@ -946,15 +936,6 @@ export default function PropertyForm() {
 
   return (
     <div className="p-4 max-w-2xl mx-auto">
-      {showSuccess && (
-        <Alert className="border-green-500 bg-green-50 mb-4">
-          <CheckCircle2 className="h-4 w-4 text-green-600" />
-          <AlertTitle className="text-green-600">Erfolgreich gespeichert!</AlertTitle>
-          <AlertDescription className="text-green-700">
-            Die Immobilie wurde erfolgreich angelegt.
-          </AlertDescription>
-        </Alert>
-      )}
       <Card>
         <CardHeader>
           <CardTitle>Neue Immobilie hinzufügen</CardTitle>
@@ -1022,13 +1003,12 @@ export default function PropertyForm() {
 # frontend/src/components/PropertyList.tsx
 
 ```tsx
-// PropertyList.tsx
+
 import { useState, useEffect } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { PlusCircle, Pencil, Trash2, ChevronDown, ChevronUp, CheckCircle2 } from 'lucide-react'
+import { PlusCircle, Pencil, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
 
 type Unit = {
   id: number
@@ -1053,9 +1033,6 @@ export default function PropertyList() {
   const [isLoading, setIsLoading] = useState(true)
   const [isDeleting, setIsDeleting] = useState<number | null>(null)
   const [expandedProperty, setExpandedProperty] = useState<number | null>(null)
-  const [searchParams] = useSearchParams()
-  const [showSuccess, setShowSuccess] = useState(false)
-  const [successMessage, setSuccessMessage] = useState('')
   const navigate = useNavigate()
 
   const loadProperties = async () => {
@@ -1077,19 +1054,6 @@ export default function PropertyList() {
   useEffect(() => {
     loadProperties()
   }, [])
-
-  useEffect(() => {
-    // Prüfen auf success Parameter in der URL
-    const success = searchParams.get('success')
-    if (success === 'edit') {
-      setShowSuccess(true)
-      setSuccessMessage('Die Immobilie wurde erfolgreich aktualisiert.')
-      // URL Parameter entfernen ohne neue Navigation
-      window.history.replaceState({}, '', '/properties')
-      // Alert nach 3 Sekunden ausblenden
-      setTimeout(() => setShowSuccess(false), 3000)
-    }
-  }, [searchParams])
 
   const toggleExpand = (propertyId: number) => {
     setExpandedProperty(expandedProperty === propertyId ? null : propertyId)
@@ -1121,16 +1085,6 @@ export default function PropertyList() {
 
   return (
     <div className="p-4 max-w-4xl mx-auto">
-      {showSuccess && (
-        <Alert className="border-green-500 bg-green-50 mb-4">
-          <CheckCircle2 className="h-4 w-4 text-green-600" />
-          <AlertTitle className="text-green-600">Erfolgreich!</AlertTitle>
-          <AlertDescription className="text-green-700">
-            {successMessage}
-          </AlertDescription>
-        </Alert>
-      )}
-
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Immobilienverwaltung</h1>
         {properties.length > 0 && (
@@ -1147,7 +1101,7 @@ export default function PropertyList() {
       {properties.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <p className="text-muted-foreground mb-4">Keine Immobilien vorhanden, Pul darbiar Azizam!</p>
+            <p className="text-muted-foreground mb-4">Keine Immobilien vorhanden</p>
             <Button 
               onClick={() => navigate('/new')}
               className="flex items-center gap-2"
@@ -1248,22 +1202,6 @@ export default function PropertyList() {
   )
 }
 
-
-```
-
-# frontend/src/components/Providers.tsx
-
-```tsx
-import { Toaster } from "@/components/ui/toaster"
-
-export function Providers({ children }: { children: React.ReactNode }) {
-  return (
-    <>
-      {children}
-      <Toaster />
-    </>
-  )
-}
 ```
 
 # frontend/src/components/Sidebar.tsx
@@ -1358,90 +1296,6 @@ const Sidebar = ({ children }: SidebarProps) => {
 }
 
 export default Sidebar
-```
-
-# frontend/src/components/sucessalert.tsx
-
-```tsx
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { CheckCircle2 } from "lucide-react"
-
-export function SuccessAlert({ title, description }: { title: string; description: string }) {
-  return (
-    <Alert className="border-green-500 bg-green-50 mb-4">
-      <CheckCircle2 className="h-4 w-4 text-green-600" />
-      <AlertTitle className="text-green-600">{title}</AlertTitle>
-      <AlertDescription className="text-green-700">
-        {description}
-      </AlertDescription>
-    </Alert>
-  )
-}
-```
-
-# frontend/src/components/ui/alert.tsx
-
-```tsx
-import * as React from "react"
-import { cva, type VariantProps } from "class-variance-authority"
-
-import { cn } from "@/lib/utils"
-
-const alertVariants = cva(
-  "relative w-full rounded-lg border px-4 py-3 text-sm [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground [&>svg~*]:pl-7",
-  {
-    variants: {
-      variant: {
-        default: "bg-background text-foreground",
-        destructive:
-          "border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive",
-      },
-    },
-    defaultVariants: {
-      variant: "default",
-    },
-  }
-)
-
-const Alert = React.forwardRef<
-  HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof alertVariants>
->(({ className, variant, ...props }, ref) => (
-  <div
-    ref={ref}
-    role="alert"
-    className={cn(alertVariants({ variant }), className)}
-    {...props}
-  />
-))
-Alert.displayName = "Alert"
-
-const AlertTitle = React.forwardRef<
-  HTMLParagraphElement,
-  React.HTMLAttributes<HTMLHeadingElement>
->(({ className, ...props }, ref) => (
-  <h5
-    ref={ref}
-    className={cn("mb-1 font-medium leading-none tracking-tight", className)}
-    {...props}
-  />
-))
-AlertTitle.displayName = "AlertTitle"
-
-const AlertDescription = React.forwardRef<
-  HTMLParagraphElement,
-  React.HTMLAttributes<HTMLParagraphElement>
->(({ className, ...props }, ref) => (
-  <div
-    ref={ref}
-    className={cn("text-sm [&_p]:leading-relaxed", className)}
-    {...props}
-  />
-))
-AlertDescription.displayName = "AlertDescription"
-
-export { Alert, AlertTitle, AlertDescription }
-
 ```
 
 # frontend/src/components/ui/button.tsx
@@ -1617,382 +1471,93 @@ export { Input }
 
 ```
 
-# frontend/src/components/ui/toast.tsx
+# frontend/src/hooks/useForms.tsx
 
 ```tsx
-import * as React from "react"
-import * as ToastPrimitives from "@radix-ui/react-toast"
-import { cva, type VariantProps } from "class-variance-authority"
-import { X } from "lucide-react"
-
-import { cn } from "@/lib/utils"
-
-const ToastProvider = ToastPrimitives.Provider
-
-const ToastViewport = React.forwardRef<
-  React.ElementRef<typeof ToastPrimitives.Viewport>,
-  React.ComponentPropsWithoutRef<typeof ToastPrimitives.Viewport>
->(({ className, ...props }, ref) => (
-  <ToastPrimitives.Viewport
-    ref={ref}
-    className={cn(
-      "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]",
-      className
-    )}
-    {...props}
-  />
-))
-ToastViewport.displayName = ToastPrimitives.Viewport.displayName
-
-const toastVariants = cva(
-  "group pointer-events-auto relative flex w-full items-center justify-between space-x-2 overflow-hidden rounded-md border p-4 pr-6 shadow-lg transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full data-[state=open]:sm:slide-in-from-bottom-full",
-  {
-    variants: {
-      variant: {
-        default: "border bg-background text-foreground",
-        destructive:
-          "destructive group border-destructive bg-destructive text-destructive-foreground",
-      },
-    },
-    defaultVariants: {
-      variant: "default",
-    },
-  }
-)
-
-const Toast = React.forwardRef<
-  React.ElementRef<typeof ToastPrimitives.Root>,
-  React.ComponentPropsWithoutRef<typeof ToastPrimitives.Root> &
-    VariantProps<typeof toastVariants>
->(({ className, variant, ...props }, ref) => {
-  return (
-    <ToastPrimitives.Root
-      ref={ref}
-      className={cn(toastVariants({ variant }), className)}
-      {...props}
-    />
-  )
-})
-Toast.displayName = ToastPrimitives.Root.displayName
-
-const ToastAction = React.forwardRef<
-  React.ElementRef<typeof ToastPrimitives.Action>,
-  React.ComponentPropsWithoutRef<typeof ToastPrimitives.Action>
->(({ className, ...props }, ref) => (
-  <ToastPrimitives.Action
-    ref={ref}
-    className={cn(
-      "inline-flex h-8 shrink-0 items-center justify-center rounded-md border bg-transparent px-3 text-sm font-medium transition-colors hover:bg-secondary focus:outline-none focus:ring-1 focus:ring-ring disabled:pointer-events-none disabled:opacity-50 group-[.destructive]:border-muted/40 group-[.destructive]:hover:border-destructive/30 group-[.destructive]:hover:bg-destructive group-[.destructive]:hover:text-destructive-foreground group-[.destructive]:focus:ring-destructive",
-      className
-    )}
-    {...props}
-  />
-))
-ToastAction.displayName = ToastPrimitives.Action.displayName
-
-const ToastClose = React.forwardRef<
-  React.ElementRef<typeof ToastPrimitives.Close>,
-  React.ComponentPropsWithoutRef<typeof ToastPrimitives.Close>
->(({ className, ...props }, ref) => (
-  <ToastPrimitives.Close
-    ref={ref}
-    className={cn(
-      "absolute right-1 top-1 rounded-md p-1 text-foreground/50 opacity-0 transition-opacity hover:text-foreground focus:opacity-100 focus:outline-none focus:ring-1 group-hover:opacity-100 group-[.destructive]:text-red-300 group-[.destructive]:hover:text-red-50 group-[.destructive]:focus:ring-red-400 group-[.destructive]:focus:ring-offset-red-600",
-      className
-    )}
-    toast-close=""
-    {...props}
-  >
-    <X className="h-4 w-4" />
-  </ToastPrimitives.Close>
-))
-ToastClose.displayName = ToastPrimitives.Close.displayName
-
-const ToastTitle = React.forwardRef<
-  React.ElementRef<typeof ToastPrimitives.Title>,
-  React.ComponentPropsWithoutRef<typeof ToastPrimitives.Title>
->(({ className, ...props }, ref) => (
-  <ToastPrimitives.Title
-    ref={ref}
-    className={cn("text-sm font-semibold [&+div]:text-xs", className)}
-    {...props}
-  />
-))
-ToastTitle.displayName = ToastPrimitives.Title.displayName
-
-const ToastDescription = React.forwardRef<
-  React.ElementRef<typeof ToastPrimitives.Description>,
-  React.ComponentPropsWithoutRef<typeof ToastPrimitives.Description>
->(({ className, ...props }, ref) => (
-  <ToastPrimitives.Description
-    ref={ref}
-    className={cn("text-sm opacity-90", className)}
-    {...props}
-  />
-))
-ToastDescription.displayName = ToastPrimitives.Description.displayName
-
-type ToastProps = React.ComponentPropsWithoutRef<typeof Toast>
-
-type ToastActionElement = React.ReactElement<typeof ToastAction>
-
-export {
-  type ToastProps,
-  type ToastActionElement,
-  ToastProvider,
-  ToastViewport,
-  Toast,
-  ToastTitle,
-  ToastDescription,
-  ToastClose,
-  ToastAction,
-}
 
 ```
 
-# frontend/src/components/ui/toaster.tsx
+# frontend/src/hooks/useProperties.tsx
 
 ```tsx
-import { useToast } from "@/hooks/use-toast"
-import {
-  Toast,
-  ToastClose,
-  ToastDescription,
-  ToastProvider,
-  ToastTitle,
-  ToastViewport,
-} from "@/components/ui/toast"
+// hooks/useProperties.ts
 
-export function Toaster() {
-  const { toasts } = useToast()
+import { useState, useCallback } from 'react'
+import { Property, PropertyFormData } from '@/types/property'
+import { propertyService } from '@/services/propertyService'
 
-  return (
-    <ToastProvider>
-      {toasts.map(function ({ id, title, description, action, ...props }) {
-        return (
-          <Toast key={id} {...props}>
-            <div className="grid gap-1">
-              {title && <ToastTitle>{title}</ToastTitle>}
-              {description && (
-                <ToastDescription>{description}</ToastDescription>
-              )}
-            </div>
-            {action}
-            <ToastClose />
-          </Toast>
-        )
-      })}
-      <ToastViewport />
-    </ToastProvider>
-  )
-}
+export function useProperties() {
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [properties, setProperties] = useState<Property[]>([])
 
-```
-
-# frontend/src/components/ui/use-toast.ts
-
-```ts
-"use client"
-
-// Inspired by react-hot-toast library
-import * as React from "react"
-
-import type {
-  ToastActionElement,
-  ToastProps,
-} from "@/components/ui/toast"
-
-const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 1000000
-
-type ToasterToast = ToastProps & {
-  id: string
-  title?: React.ReactNode
-  description?: React.ReactNode
-  action?: ToastActionElement
-}
-
-const actionTypes = {
-  ADD_TOAST: "ADD_TOAST",
-  UPDATE_TOAST: "UPDATE_TOAST",
-  DISMISS_TOAST: "DISMISS_TOAST",
-  REMOVE_TOAST: "REMOVE_TOAST",
-} as const
-
-let count = 0
-
-function genId() {
-  count = (count + 1) % Number.MAX_SAFE_INTEGER
-  return count.toString()
-}
-
-type ActionType = typeof actionTypes
-
-type Action =
-  | {
-      type: ActionType["ADD_TOAST"]
-      toast: ToasterToast
+  const loadProperties = useCallback(async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const data = await propertyService.getAll()
+      setProperties(data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ein Fehler ist aufgetreten')
+    } finally {
+      setIsLoading(false)
     }
-  | {
-      type: ActionType["UPDATE_TOAST"]
-      toast: Partial<ToasterToast>
-    }
-  | {
-      type: ActionType["DISMISS_TOAST"]
-      toastId?: ToasterToast["id"]
-    }
-  | {
-      type: ActionType["REMOVE_TOAST"]
-      toastId?: ToasterToast["id"]
-    }
+  }, [])
 
-interface State {
-  toasts: ToasterToast[]
-}
-
-const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
-
-const addToRemoveQueue = (toastId: string) => {
-  if (toastTimeouts.has(toastId)) {
-    return
+  const createProperty = async (data: PropertyFormData) => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const newProperty = await propertyService.create(data)
+      setProperties(prev => [...prev, newProperty])
+      return newProperty
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ein Fehler ist aufgetreten')
+      throw err
+    } finally {
+      setIsLoading(false)
+    }
   }
 
-  const timeout = setTimeout(() => {
-    toastTimeouts.delete(toastId)
-    dispatch({
-      type: "REMOVE_TOAST",
-      toastId: toastId,
-    })
-  }, TOAST_REMOVE_DELAY)
-
-  toastTimeouts.set(toastId, timeout)
-}
-
-export const reducer = (state: State, action: Action): State => {
-  switch (action.type) {
-    case "ADD_TOAST":
-      return {
-        ...state,
-        toasts: [action.toast, ...state.toasts].slice(0, TOAST_LIMIT),
-      }
-
-    case "UPDATE_TOAST":
-      return {
-        ...state,
-        toasts: state.toasts.map((t) =>
-          t.id === action.toast.id ? { ...t, ...action.toast } : t
-        ),
-      }
-
-    case "DISMISS_TOAST": {
-      const { toastId } = action
-
-      // ! Side effects ! - This could be extracted into a dismissToast() action,
-      // but I'll keep it here for simplicity
-      if (toastId) {
-        addToRemoveQueue(toastId)
-      } else {
-        state.toasts.forEach((toast) => {
-          addToRemoveQueue(toast.id)
-        })
-      }
-
-      return {
-        ...state,
-        toasts: state.toasts.map((t) =>
-          t.id === toastId || toastId === undefined
-            ? {
-                ...t,
-                open: false,
-              }
-            : t
-        ),
-      }
+  const updateProperty = async (id: string, data: PropertyFormData) => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const updatedProperty = await propertyService.update(id, data)
+      setProperties(prev => prev.map(p => p.id === Number(id) ? updatedProperty : p))
+      return updatedProperty
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ein Fehler ist aufgetreten')
+      throw err
+    } finally {
+      setIsLoading(false)
     }
-    case "REMOVE_TOAST":
-      if (action.toastId === undefined) {
-        return {
-          ...state,
-          toasts: [],
-        }
-      }
-      return {
-        ...state,
-        toasts: state.toasts.filter((t) => t.id !== action.toastId),
-      }
   }
-}
 
-const listeners: Array<(state: State) => void> = []
-
-let memoryState: State = { toasts: [] }
-
-function dispatch(action: Action) {
-  memoryState = reducer(memoryState, action)
-  listeners.forEach((listener) => {
-    listener(memoryState)
-  })
-}
-
-type Toast = Omit<ToasterToast, "id">
-
-function toast({ ...props }: Toast) {
-  const id = genId()
-
-  const update = (props: ToasterToast) =>
-    dispatch({
-      type: "UPDATE_TOAST",
-      toast: { ...props, id },
-    })
-  const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
-
-  dispatch({
-    type: "ADD_TOAST",
-    toast: {
-      ...props,
-      id,
-      open: true,
-      onOpenChange: (open) => {
-        if (!open) dismiss()
-      },
-    },
-  })
+  const deleteProperty = async (id: number) => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      await propertyService.delete(id)
+      setProperties(prev => prev.filter(p => p.id !== id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ein Fehler ist aufgetreten')
+      throw err
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   return {
-    id: id,
-    dismiss,
-    update,
+    properties,
+    isLoading,
+    error,
+    loadProperties,
+    createProperty,
+    updateProperty,
+    deleteProperty
   }
 }
-
-function useToast() {
-  const [state, setState] = React.useState<State>(memoryState)
-
-  React.useEffect(() => {
-    listeners.push(setState)
-    return () => {
-      const index = listeners.indexOf(setState)
-      if (index > -1) {
-        listeners.splice(index, 1)
-      }
-    }
-  }, [state])
-
-  return {
-    ...state,
-    toast,
-    dismiss: (toastId?: string) => dispatch({ type: "DISMISS_TOAST", toastId }),
-  }
-}
-
-export { useToast, toast }
-
-```
-
-# frontend/src/hooks/usePropertyForm.ts
-
-```ts
-
 ```
 
 # frontend/src/index.css
@@ -2096,6 +1661,90 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 )
 
+```
+
+# frontend/src/services/propertyService.ts
+
+```ts
+// services/propertyService.ts
+
+import { Property, PropertyFormData } from '@/types/property'
+
+const API_URL = 'http://localhost:3001/properties'
+
+export const propertyService = {
+  // Alle Properties laden
+  async getAll(): Promise<Property[]> {
+    const response = await fetch(API_URL)
+    if (!response.ok) throw new Error('Failed to fetch properties')
+    return response.json()
+  },
+
+  // Eine Property laden
+  async getById(id: string): Promise<Property> {
+    const response = await fetch(`${API_URL}/${id}`)
+    if (!response.ok) throw new Error('Failed to fetch property')
+    return response.json()
+  },
+
+  // Neue Property erstellen
+  async create(data: PropertyFormData): Promise<Property> {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    if (!response.ok) throw new Error('Failed to create property')
+    return response.json()
+  },
+
+  // Property aktualisieren
+  async update(id: string, data: PropertyFormData): Promise<Property> {
+    const response = await fetch(`${API_URL}/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    if (!response.ok) throw new Error('Failed to update property')
+    return response.json()
+  },
+
+  // Property löschen
+  async delete(id: number): Promise<void> {
+    const response = await fetch(`${API_URL}/${id}`, {
+      method: 'DELETE'
+    })
+    if (!response.ok) throw new Error('Failed to delete property')
+  }
+}
+```
+
+# frontend/src/types/property.ts
+
+```ts
+// types/property.ts
+
+export interface Unit {
+    id?: number
+    name: string
+    type: string
+    size: number
+    status: string
+    rent: number
+  }
+  
+  export interface Property {
+    id?: number
+    address: string
+    size: number
+    price: number
+    status: string
+    units?: Unit[]
+  }
+  
+  export interface PropertyFormData extends Omit<Property, 'id'> {
+    units?: Omit<Unit, 'id'>[]
+  }
 ```
 
 # frontend/src/vite-env.d.ts

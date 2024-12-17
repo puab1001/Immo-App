@@ -4,6 +4,15 @@ import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { propertyTypes } from '@/constants/PropertyTypes'
+
 
 export default function PropertyForm() {
   const navigate = useNavigate()
@@ -12,24 +21,26 @@ export default function PropertyForm() {
     address: '',
     size: '',
     price: '',
-    status: 'available'
+    status: 'available',
+    property_type: ''
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmitting(true)
-
+  
     try {
       const response = await fetch('http://localhost:3001/properties', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...property,
+          ...property,  // Dies behält alle Felder bei
           size: Number(property.size),
           price: Number(property.price)
+          // property_type wird jetzt nicht mehr herausgefiltert
         })
       })
-
+  
       if (response.ok) {
         navigate('/properties')
       } else {
@@ -56,44 +67,41 @@ export default function PropertyForm() {
               <Input
                 required
                 value={property.address}
-                onChange={e => setProperty({...property, address: e.target.value})}
-                className="mt-1"
-              />
-            </div>
-            
-            <div>
-              <label className="text-sm font-medium">Größe (m²)</label>
-              <Input
-                required
-                type="number"
-                min="1"
-                value={property.size}
-                onChange={e => setProperty({...property, size: e.target.value})}
-                className="mt-1"
-              />
-            </div>
-            
-            <div>
-              <label className="text-sm font-medium">Preis (€)</label>
-              <Input
-                required
-                type="number"
-                min="0"
-                value={property.price}
-                onChange={e => setProperty({...property, price: e.target.value})}
+                onChange={e => setProperty({ ...property, address: e.target.value })}
                 className="mt-1"
               />
             </div>
 
+            <div>
+              <label className="text-sm font-medium">Art der Immobilie</label>
+              <Select
+                value={property.property_type}
+                onValueChange={(value) => setProperty({ ...property, property_type: value })}
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Bitte wählen..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {propertyTypes.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {type}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+          
+
             <div className="flex gap-4 pt-4">
-              <Button 
-                type="submit" 
+              <Button
+                type="submit"
                 disabled={isSubmitting}
               >
                 {isSubmitting ? 'Wird gespeichert...' : 'Speichern'}
               </Button>
-              <Button 
-                type="button" 
+              <Button
+                type="button"
                 variant="outline"
                 onClick={() => navigate('/properties')}
                 disabled={isSubmitting}
