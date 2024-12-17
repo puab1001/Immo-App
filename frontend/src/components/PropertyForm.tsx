@@ -1,16 +1,17 @@
+// PropertyForm.tsx
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
-export default function NewPropertyForm() {
+export default function PropertyForm() {
   const navigate = useNavigate()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [property, setProperty] = useState({
     address: '',
-    size: '',  // Änderung zu String für bessere Formular-Handhabung
-    price: '', // Änderung zu String für bessere Formular-Handhabung
+    size: '',
+    price: '',
     status: 'available'
   })
 
@@ -30,8 +31,7 @@ export default function NewPropertyForm() {
       })
 
       if (response.ok) {
-        // Erfolgreich gespeichert, zurück zur Liste navigieren
-        navigate('/')
+        navigate('/properties')
       } else {
         alert('Fehler beim Speichern der Immobilie')
       }
@@ -95,7 +95,7 @@ export default function NewPropertyForm() {
               <Button 
                 type="button" 
                 variant="outline"
-                onClick={() => navigate('/')}
+                onClick={() => navigate('/properties')}
                 disabled={isSubmitting}
               >
                 Abbrechen

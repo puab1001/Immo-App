@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "start": "ts-node src/index.ts",
-    "dev": "nodemon src/index.ts", 
+    "dev": "nodemon src/index.ts",
     "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -14,7 +14,6 @@
   "description": "",
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.21.2",
     "pg": "^8.13.1"
   },
   "devDependencies": {
@@ -22,9 +21,8 @@
     "@types/express": "^5.0.0",
     "@types/node": "^20.10.5",
     "@types/pg": "^8.11.10",
+    "express": "^4.21.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   }
-
 }
-
