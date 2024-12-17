@@ -93,16 +93,16 @@ const createProperty: RequestHandler = async (req, res) => {
   const client = await db.connect();
   
   try {
-    const { address, size, price, status, units } = req.body;
+    const { address, size, price, status, property_type, units } = req.body;
 
     await client.query('BEGIN');
     
     // Property erstellen
     const propertyResult = await client.query(
-      `INSERT INTO properties (address, size, price, status)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO properties (address, size, price, status, property_type)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [address, size, price, status]
+      [address, size, price, status, property_type]  // property_type als 5. Parameter
     );
 
     const propertyId = propertyResult.rows[0].id;
@@ -190,15 +190,15 @@ const updateProperty: RequestHandler = async (req, res) => {
 
     await client.query('BEGIN');
 
-    const { address, size, price, status, units } = req.body;
+    const { address, size, price, status, property_type, units } = req.body;
     
     // Update property
     const propertyResult = await client.query(
       `UPDATE properties 
-       SET address = $1, size = $2, price = $3, status = $4
-       WHERE id = $5 
+       SET address = $1, size = $2, price = $3, status = $4, property_type = $5
+       WHERE id = $6 
        RETURNING *`,
-      [address, size, price, status, id]
+      [address, size, price, status, property_type, id]  // property_type als 5. Parameter
     );
     
     if (propertyResult.rows.length === 0) {
@@ -419,6 +419,7 @@ export default tseslint.config(
     "preview": "vite preview"
   },
   "dependencies": {
+    "@radix-ui/react-select": "^2.1.4",
     "@radix-ui/react-slot": "^1.1.1",
     "@radix-ui/react-toast": "^1.2.4",
     "@shadcn/ui": "^0.0.4",
@@ -617,6 +618,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Plus, Trash } from 'lucide-react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { propertyTypes } from '@/constants/PropertyTypes'
+
 
 interface Unit {
   id?: number
@@ -895,6 +905,15 @@ import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { propertyTypes } from '@/constants/PropertyTypes'
+
 
 export default function PropertyForm() {
   const navigate = useNavigate()
@@ -903,24 +922,26 @@ export default function PropertyForm() {
     address: '',
     size: '',
     price: '',
-    status: 'available'
+    status: 'available',
+    property_type: ''
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmitting(true)
-
+  
     try {
       const response = await fetch('http://localhost:3001/properties', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...property,
+          ...property,  // Dies behält alle Felder bei
           size: Number(property.size),
           price: Number(property.price)
+          // property_type wird jetzt nicht mehr herausgefiltert
         })
       })
-
+  
       if (response.ok) {
         navigate('/properties')
       } else {
@@ -947,44 +968,41 @@ export default function PropertyForm() {
               <Input
                 required
                 value={property.address}
-                onChange={e => setProperty({...property, address: e.target.value})}
-                className="mt-1"
-              />
-            </div>
-            
-            <div>
-              <label className="text-sm font-medium">Größe (m²)</label>
-              <Input
-                required
-                type="number"
-                min="1"
-                value={property.size}
-                onChange={e => setProperty({...property, size: e.target.value})}
-                className="mt-1"
-              />
-            </div>
-            
-            <div>
-              <label className="text-sm font-medium">Preis (€)</label>
-              <Input
-                required
-                type="number"
-                min="0"
-                value={property.price}
-                onChange={e => setProperty({...property, price: e.target.value})}
+                onChange={e => setProperty({ ...property, address: e.target.value })}
                 className="mt-1"
               />
             </div>
 
+            <div>
+              <label className="text-sm font-medium">Art der Immobilie</label>
+              <Select
+                value={property.property_type}
+                onValueChange={(value) => setProperty({ ...property, property_type: value })}
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Bitte wählen..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {propertyTypes.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {type}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+          
+
             <div className="flex gap-4 pt-4">
-              <Button 
-                type="submit" 
+              <Button
+                type="submit"
                 disabled={isSubmitting}
               >
                 {isSubmitting ? 'Wird gespeichert...' : 'Speichern'}
               </Button>
-              <Button 
-                type="button" 
+              <Button
+                type="button"
                 variant="outline"
                 onClick={() => navigate('/properties')}
                 disabled={isSubmitting}
@@ -1003,7 +1021,6 @@ export default function PropertyForm() {
 # frontend/src/components/PropertyList.tsx
 
 ```tsx
-
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -1025,6 +1042,7 @@ type Property = {
   size: number
   price: number
   status: string
+  property_type: string
   units: Unit[]
 }
 
@@ -1088,7 +1106,7 @@ export default function PropertyList() {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Immobilienverwaltung</h1>
         {properties.length > 0 && (
-          <Button 
+          <Button
             className="flex items-center gap-2"
             onClick={() => navigate('/new')}
           >
@@ -1102,7 +1120,7 @@ export default function PropertyList() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <p className="text-muted-foreground mb-4">Keine Immobilien vorhanden</p>
-            <Button 
+            <Button
               onClick={() => navigate('/new')}
               className="flex items-center gap-2"
             >
@@ -1124,8 +1142,8 @@ export default function PropertyList() {
                       onClick={() => toggleExpand(property.id)}
                       className="p-0 hover:bg-transparent"
                     >
-                      {expandedProperty === property.id ? 
-                        <ChevronUp className="w-4 h-4" /> : 
+                      {expandedProperty === property.id ?
+                        <ChevronUp className="w-4 h-4" /> :
                         <ChevronDown className="w-4 h-4" />
                       }
                     </Button>
@@ -1152,15 +1170,9 @@ export default function PropertyList() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div>
-                    <p className="text-sm text-gray-500">Größe</p>
-                    <p>{property.size} m²</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Preis</p>
-                    <p>{property.price} €</p>
-                  </div>
+                <div className="mb-4">
+                  <p className="text-sm text-gray-500">Art der Immobilie</p>
+                  <p>{property.property_type || 'Keine Angabe'}</p>
                 </div>
 
                 {/* Units Section */}
@@ -1469,6 +1481,143 @@ Input.displayName = "Input"
 
 export { Input }
 
+```
+
+# frontend/src/components/ui/select.tsx
+
+```tsx
+// src/components/ui/select.tsx
+import * as React from "react"
+import * as SelectPrimitive from "@radix-ui/react-select"
+import { Check, ChevronDown } from "lucide-react"
+
+import { cn } from "@/lib/utils"
+
+const Select = SelectPrimitive.Root
+
+const SelectGroup = SelectPrimitive.Group
+
+const SelectValue = SelectPrimitive.Value
+
+const SelectTrigger = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
+>(({ className, children, ...props }, ref) => (
+  <SelectPrimitive.Trigger
+    ref={ref}
+    className={cn(
+      "flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+      className
+    )}
+    {...props}
+  >
+    {children}
+    <SelectPrimitive.Icon asChild>
+      <ChevronDown className="h-4 w-4 opacity-50" />
+    </SelectPrimitive.Icon>
+  </SelectPrimitive.Trigger>
+))
+SelectTrigger.displayName = SelectPrimitive.Trigger.displayName
+
+const SelectContent = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
+>(({ className, children, position = "popper", ...props }, ref) => (
+  <SelectPrimitive.Portal>
+    <SelectPrimitive.Content
+      ref={ref}
+      className={cn(
+        "relative z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        position === "popper" &&
+          "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
+        className
+      )}
+      position={position}
+      {...props}
+    >
+      <SelectPrimitive.Viewport
+        className={cn(
+          "p-1",
+          position === "popper" &&
+            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]"
+        )}
+      >
+        {children}
+      </SelectPrimitive.Viewport>
+    </SelectPrimitive.Content>
+  </SelectPrimitive.Portal>
+))
+SelectContent.displayName = SelectPrimitive.Content.displayName
+
+const SelectLabel = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Label>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Label>
+>(({ className, ...props }, ref) => (
+  <SelectPrimitive.Label
+    ref={ref}
+    className={cn("px-2 py-1.5 text-sm font-semibold", className)}
+    {...props}
+  />
+))
+SelectLabel.displayName = SelectPrimitive.Label.displayName
+
+const SelectItem = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
+>(({ className, children, ...props }, ref) => (
+  <SelectPrimitive.Item
+    ref={ref}
+    className={cn(
+      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-8 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      className
+    )}
+    {...props}
+  >
+    <span className="absolute right-2 flex h-3.5 w-3.5 items-center justify-center">
+      <SelectPrimitive.ItemIndicator>
+        <Check className="h-4 w-4" />
+      </SelectPrimitive.ItemIndicator>
+    </span>
+    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+  </SelectPrimitive.Item>
+))
+SelectItem.displayName = SelectPrimitive.Item.displayName
+
+const SelectSeparator = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Separator>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Separator>
+>(({ className, ...props }, ref) => (
+  <SelectPrimitive.Separator
+    ref={ref}
+    className={cn("-mx-1 my-1 h-px bg-muted", className)}
+    {...props}
+  />
+))
+SelectSeparator.displayName = SelectPrimitive.Separator.displayName
+
+export {
+  Select,
+  SelectGroup,
+  SelectValue,
+  SelectTrigger,
+  SelectContent,
+  SelectLabel,
+  SelectItem,
+  SelectSeparator,
+}
+```
+
+# frontend/src/constants/propertyTypes.ts
+
+```ts
+export const propertyTypes = [
+    'Einfamilienhaus',
+    'Mehrfamilienhaus', 
+    'Eigentumswohnung',
+    'Doppelhaushälfte',
+    'Reihenhaus',
+    'Villa'
+  ] as const
 ```
 
 # frontend/src/hooks/useForms.tsx
