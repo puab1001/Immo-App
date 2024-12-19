@@ -3,25 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { PlusCircle, Pencil, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
-
-type Unit = {
-  id: number
-  name: string
-  type: string
-  size: number
-  status: string
-  rent: number
-}
-
-type Property = {
-  id: number
-  address: string
-  size: number
-  price: number
-  status: string
-  property_type: string
-  units: Unit[]
-}
+import { Property, Unit } from '@/types/property'
 
 export default function PropertyList() {
   const [properties, setProperties] = useState<Property[]>([])
@@ -50,18 +32,20 @@ export default function PropertyList() {
     loadProperties()
   }, [])
 
-  const toggleExpand = (propertyId: number) => {
-    setExpandedProperty(expandedProperty === propertyId ? null : propertyId)
+  const toggleExpand = (propertyId: number | undefined) => {
+    if (!propertyId) return;
+    setExpandedProperty(expandedProperty === propertyId ? null : propertyId);
   }
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Möchten Sie diese Immobilie wirklich löschen?')) return
+  const handleDelete = async (id: number | undefined) => {
+    if (!id) return;
+    if (!confirm('Möchten Sie diese Immobilie wirklich löschen?')) return;
 
-    setIsDeleting(id)
+    setIsDeleting(id);
     try {
       const response = await fetch(`http://localhost:3001/properties/${id}`, {
         method: 'DELETE'
-      })
+      });
 
       if (!response.ok) {
         throw new Error(await response.text())
@@ -96,7 +80,7 @@ export default function PropertyList() {
       {properties.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <p className="text-muted-foreground mb-4">Keine Immobilien vorhanden</p>
+            <p className="text-muted-foreground mb-4">Keine Immobilien vorhanden, Pul darbiar Azizam!</p>
             <Button
               onClick={() => navigate('/new')}
               className="flex items-center gap-2"
@@ -147,41 +131,58 @@ export default function PropertyList() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="mb-4">
-                  <p className="text-sm text-gray-500">Art der Immobilie</p>
-                  <p>{property.property_type || 'Keine Angabe'}</p>
-                </div>
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-gray-500">Art der Immobilie</p>
+                      <p>{property.property_type || 'Keine Angabe'}</p>
+                    </div>
 
-                {/* Units Section */}
-                {expandedProperty === property.id && property.units && property.units.length > 0 && (
-                  <div className="mt-4 border-t pt-4">
-                    <h3 className="text-sm font-semibold mb-3">Einheiten:</h3>
-                    <div className="grid gap-3">
-                      {property.units.map((unit, index) => (
-                        <div key={index} className="bg-gray-50 p-3 rounded-lg">
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                            <div>
-                              <p className="text-xs text-gray-500">Name</p>
-                              <p className="text-sm font-medium">{unit.name}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-500">Typ</p>
-                              <p className="text-sm">{unit.type}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-500">Größe</p>
-                              <p className="text-sm">{unit.size} m²</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-500">Miete</p>
-                              <p className="text-sm">{unit.rent} €</p>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                    <div>
+                      <p className="text-sm text-gray-500">Monatliche Gesamtmiete</p>
+                      <p className="font-medium">
+                        {property.total_rent?.toLocaleString('de-DE')} €
+                      </p>
                     </div>
                   </div>
-                )}
+
+                  {/* Units Section */}
+                  {expandedProperty === property.id && property.units && property.units.length > 0 && (
+                    <div className="mt-4 border-t pt-4">
+                      <h3 className="text-sm font-semibold mb-3">Einheiten:</h3>
+                      <div className="grid gap-3">
+                        {property.units.map((unit, index) => (
+                          <div key={index} className="bg-gray-50 p-3 rounded-lg">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                              <div>
+                                <p className="text-xs text-gray-500">Name</p>
+                                <p className="text-sm font-medium">{unit.name}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-500">Typ</p>
+                                <p className="text-sm">{unit.type}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-500">Größe</p>
+                                <p className="text-sm">{unit.size} m²</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-500">Status</p>
+                                <p className="text-sm">{unit.status}</p>
+                              </div>
+                              {unit.status === 'besetzt' && (
+                                <div>
+                                  <p className="text-xs text-gray-500">Miete</p>
+                                  <p className="text-sm">{unit.rent} €</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           ))}

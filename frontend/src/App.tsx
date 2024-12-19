@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar'
 import PropertyList from './components/PropertyList'
 import PropertyForm from './components/PropertyForm'
 import EditPropertyWrapper from './components/EditPropertyWrapper' // Neu importiert
+import Dashboard from './components/Dashboard'
 
 function App() {
   return (
@@ -10,7 +11,7 @@ function App() {
       <Sidebar>
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<div>Dashboard (Coming Soon)</div>} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/properties" element={<PropertyList />} />
           <Route path="/new" element={<PropertyForm />} />
           <Route path="/edit/:id" element={<EditPropertyWrapper />} /> {/* Hier den Wrapper verwenden */}

@@ -27,9 +27,16 @@ db.connect().then(() => {
 // GET alle Properties mit Units
 const getAllProperties: RequestHandler = async (_req, res) => {
   try {
-    // Properties laden
-    const propertiesResult = await db.query('SELECT * FROM properties');
-    
+    // Properties mit Gesamtmiete laden
+    const propertiesResult = await db.query(`
+      SELECT 
+        p.*,
+        COALESCE(SUM(u.rent), 0) as total_rent
+      FROM properties p
+      LEFT JOIN units u ON u.property_id = p.id 
+      GROUP BY p.id
+    `);
+
     // Für jede Property die Units laden
     const properties = await Promise.all(
       propertiesResult.rows.map(async (property) => {
@@ -54,42 +61,48 @@ const getAllProperties: RequestHandler = async (_req, res) => {
 // POST neue Property mit Units
 const createProperty: RequestHandler = async (req, res) => {
   const client = await db.connect();
-  
+
   try {
-    const { address, size, price, status, property_type, units } = req.body;
+    const { address, property_type, units } = req.body;
 
     await client.query('BEGIN');
-    
+
     // Property erstellen
     const propertyResult = await client.query(
-      `INSERT INTO properties (address, size, price, status, property_type)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO properties (address, property_type)
+       VALUES ($1, $2)
        RETURNING *`,
-      [address, size, price, status, property_type]  // property_type als 5. Parameter
+      [address, property_type]
     );
 
     const propertyId = propertyResult.rows[0].id;
 
-    // Units erstellen falls vorhanden
+    // Units erstellen mit Default-Werten für size und rent
     const unitPromises = units?.map((unit: any) =>
       client.query(
         `INSERT INTO units (property_id, name, type, size, status, rent)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        [propertyId, unit.name, unit.type, unit.size, unit.status, unit.rent]
+        [
+          propertyId,
+          unit.name,
+          unit.type,
+          unit.size || 0,
+          unit.status,
+          unit.status === 'besetzt' ? (unit.rent || 0) : 0  // Wenn besetzt, dann rent oder 0, sonst 0
+        ]
       )
     ) || [];
 
     const unitsResults = await Promise.all(unitPromises);
-    
+
     await client.query('COMMIT');
 
-    // Response zusammenbauen
     const response = {
       ...propertyResult.rows[0],
       units: unitsResults.map(result => result.rows[0])
     };
-    
+
     res.status(201).json(response);
   } catch (error) {
     await client.query('ROLLBACK');
@@ -104,7 +117,7 @@ const createProperty: RequestHandler = async (req, res) => {
 const getPropertyById: RequestHandler = async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    
+
     if (isNaN(id)) {
       res.status(400).json({ error: 'Ungültige ID' });
       return;
@@ -115,7 +128,7 @@ const getPropertyById: RequestHandler = async (req, res) => {
       'SELECT * FROM properties WHERE id = $1',
       [id]
     );
-    
+
     if (propertyResult.rows.length === 0) {
       res.status(404).json({ error: 'Immobilie nicht gefunden' });
       return;
@@ -126,13 +139,13 @@ const getPropertyById: RequestHandler = async (req, res) => {
       'SELECT * FROM units WHERE property_id = $1',
       [id]
     );
-    
+
     // Property und Units zusammenführen
     const property = {
       ...propertyResult.rows[0],
       units: unitsResult.rows
     };
-    
+
     res.json(property);
   } catch (error) {
     console.error('Datenbankfehler:', error);
@@ -143,7 +156,7 @@ const getPropertyById: RequestHandler = async (req, res) => {
 // PUT/Update Property mit Units
 const updateProperty: RequestHandler = async (req, res) => {
   const client = await db.connect();
-  
+
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -153,17 +166,16 @@ const updateProperty: RequestHandler = async (req, res) => {
 
     await client.query('BEGIN');
 
-    const { address, size, price, status, property_type, units } = req.body;
-    
-    // Update property
+    const { address, property_type, units } = req.body;
+
     const propertyResult = await client.query(
       `UPDATE properties 
-       SET address = $1, size = $2, price = $3, status = $4, property_type = $5
-       WHERE id = $6 
+       SET address = $1, property_type = $2
+       WHERE id = $3 
        RETURNING *`,
-      [address, size, price, status, property_type, id]  // property_type als 5. Parameter
+      [address, property_type, id]
     );
-    
+
     if (propertyResult.rows.length === 0) {
       await client.query('ROLLBACK');
       res.status(404).json({ error: 'Immobilie nicht gefunden' });
@@ -173,26 +185,32 @@ const updateProperty: RequestHandler = async (req, res) => {
     // Bestehende units löschen
     await client.query('DELETE FROM units WHERE property_id = $1', [id]);
 
-    // Neue units einfügen
+    // Neue units einfügen mit Default-Werten
     const unitPromises = units.map((unit: any) =>
       client.query(
         `INSERT INTO units (property_id, name, type, size, status, rent)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        [id, unit.name, unit.type, unit.size, unit.status, unit.rent]
+        [
+          id,
+          unit.name,
+          unit.type,
+          unit.size || 0,
+          unit.status,
+          unit.status === 'besetzt' ? (unit.rent || 0) : 0  // Wenn besetzt, dann rent oder 0, sonst 0
+        ]
       )
     );
 
     const unitsResults = await Promise.all(unitPromises);
-    
+
     await client.query('COMMIT');
 
-    // Response zusammenbauen
     const response = {
       ...propertyResult.rows[0],
       units: unitsResults.map(result => result.rows[0])
     };
-    
+
     res.json(response);
   } catch (error) {
     await client.query('ROLLBACK');
@@ -213,18 +231,52 @@ const deleteProperty: RequestHandler = async (req, res) => {
     }
 
     const result = await db.query('DELETE FROM properties WHERE id = $1 RETURNING *', [id]);
-    
+
     if (result.rows.length === 0) {
       res.status(404).json({ error: 'Immobilie nicht gefunden' });
       return;
     }
-    
+
     res.json({ message: 'Immobilie erfolgreich gelöscht' });
   } catch (error) {
     console.error('Fehler beim Löschen:', error);
     res.status(500).json({ error: 'Fehler beim Löschen' });
   }
 };
+
+// Dashboard Statistiken Endpunkt
+app.get('/dashboard/stats', async (_req, res) => {
+  try {
+    // Gesamtanzahl Immobilien
+    const propertiesCount = await db.query('SELECT COUNT(*) FROM properties');
+
+    // Gesamtanzahl Wohneinheiten
+    const unitsCount = await db.query('SELECT COUNT(*) FROM units');
+
+    // Monatliche Gesamtmiete
+    const totalRent = await db.query('SELECT COALESCE(SUM(rent), 0) FROM units WHERE status = $1', ['besetzt']);
+
+
+    // Leerstehende Einheiten
+    const vacantUnits = await db.query(`
+      SELECT u.*, p.address as property_address
+      FROM units u
+      JOIN properties p ON u.property_id = p.id
+      WHERE u.status = $1
+    `, ['verfügbar']);
+
+    res.json({
+      total_properties: propertiesCount.rows[0].count,
+      total_units: unitsCount.rows[0].count,
+      monthly_rent: totalRent.rows[0].coalesce,
+
+      vacant_units: vacantUnits.rows
+    });
+  } catch (error) {
+    console.error('Dashboard Statistiken Fehler:', error);
+    res.status(500).json({ error: 'Fehler beim Laden der Dashboard-Daten' });
+  }
+});
 
 // Routen registrieren
 app.get('/properties', getAllProperties);

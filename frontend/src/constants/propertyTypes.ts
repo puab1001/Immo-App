@@ -1,24 +1,6 @@
-// src/types/property.ts
+// src/constants/propertyTypes.ts
 
-export interface Unit {
-  id?: number;
-  name: string;
-  type: string;
-  size: number;
-  status: string;
-  rent: number;
-}
-
-export interface Property {
-  id?: number;
-  address: string;
-  size: number;
-  price: number;
-  status: string;
-  property_type: string;
-  units?: Unit[];
-}
-
+// Immobilientypen
 export const propertyTypes = [
   'Einfamilienhaus',
   'Mehrfamilienhaus', 
@@ -28,32 +10,44 @@ export const propertyTypes = [
   'Villa'
 ] as const;
 
-// Form state types
-export interface PropertyFormData extends Omit<Property, 'id'> {
-  units?: Omit<Unit, 'id'>[];
+// Typen für Einheiten (Wohnungen/Gewerbe)
+export const UNIT_TYPES = [
+  'Wohnung',
+  'Gewerbe'
+] as const;
+
+// Status für Einheiten
+export const UNIT_STATUS = [
+  'verfügbar',
+  'besetzt'
+] as const;
+
+// TypeScript Typ-Definitionen
+export type PropertyType = typeof propertyTypes[number];
+export type UnitType = typeof UNIT_TYPES[number];
+export type UnitStatus = typeof UNIT_STATUS[number];
+
+// Interface für Property
+export interface Property {
+  id?: number;
+  address: string;
+  property_type: PropertyType;
+  total_rent: number; 
+  units: Unit[];
 }
 
-// API response types 
+// Interface für Unit
+export interface Unit {
+  id?: number;
+  name: string;
+  type: UnitType;
+  size: number | '';
+  status: UnitStatus;
+  rent?: number | '';
+}
+
+// Interface für API-Antworten
 export interface ApiResponse<T> {
   data?: T;
   error?: string;
 }
-
-// Status options
-export const PROPERTY_STATUS = {
-  AVAILABLE: 'verfügbar',
-  RENTED: 'vermietet',
-  SOLD: 'verkauft',
-  INACTIVE: 'inaktiv'
-} as const;
-
-export type PropertyStatus = typeof PROPERTY_STATUS[keyof typeof PROPERTY_STATUS];
-
-// Unit status options
-export const UNIT_STATUS = {
-  AVAILABLE: 'frei',
-  RENTED: 'vermietet',
-  MAINTENANCE: 'wartung'
-} as const;
-
-export type UnitStatus = typeof UNIT_STATUS[keyof typeof UNIT_STATUS];

@@ -1,12 +1,12 @@
 // types/property.ts
 
 export interface Property {
-  id: number;
+  id?: number;
   address: string;
   size: number;
   price: number;
-  status: string;
   property_type: string;
+  total_rent: number; 
   units: Unit[];
 }
 

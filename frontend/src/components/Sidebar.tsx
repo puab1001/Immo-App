@@ -39,7 +39,7 @@ const Sidebar = ({ children }: SidebarProps) => {
         )}
       >
         <div className="flex items-center justify-between p-4 border-b border-gray-800">
-          {!collapsed && <span className="text-xl font-bold">Immo-App</span>}
+          {!collapsed && <span className="text-xl font-bold">Manager 06</span>}
           <Button
             variant="ghost"
             size="icon"

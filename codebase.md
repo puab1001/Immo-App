@@ -93,27 +93,34 @@ const createProperty: RequestHandler = async (req, res) => {
   const client = await db.connect();
   
   try {
-    const { address, size, price, status, property_type, units } = req.body;
+    const { address, property_type, units } = req.body;
 
     await client.query('BEGIN');
     
     // Property erstellen
     const propertyResult = await client.query(
-      `INSERT INTO properties (address, size, price, status, property_type)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO properties (address, property_type)
+       VALUES ($1, $2)
        RETURNING *`,
-      [address, size, price, status, property_type]  // property_type als 5. Parameter
+      [address, property_type]
     );
 
     const propertyId = propertyResult.rows[0].id;
 
-    // Units erstellen falls vorhanden
+    // Units erstellen mit Default-Werten für size und rent
     const unitPromises = units?.map((unit: any) =>
       client.query(
         `INSERT INTO units (property_id, name, type, size, status, rent)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        [propertyId, unit.name, unit.type, unit.size, unit.status, unit.rent]
+        [
+          propertyId, 
+          unit.name, 
+          unit.type, 
+          unit.size || 0, 
+          unit.status,
+          unit.status === 'besetzt' ? (unit.rent || 0) : 0  // Wenn besetzt, dann rent oder 0, sonst 0
+        ]
       )
     ) || [];
 
@@ -121,7 +128,6 @@ const createProperty: RequestHandler = async (req, res) => {
     
     await client.query('COMMIT');
 
-    // Response zusammenbauen
     const response = {
       ...propertyResult.rows[0],
       units: unitsResults.map(result => result.rows[0])
@@ -190,15 +196,14 @@ const updateProperty: RequestHandler = async (req, res) => {
 
     await client.query('BEGIN');
 
-    const { address, size, price, status, property_type, units } = req.body;
+    const { address, property_type, units } = req.body;
     
-    // Update property
     const propertyResult = await client.query(
       `UPDATE properties 
-       SET address = $1, size = $2, price = $3, status = $4, property_type = $5
-       WHERE id = $6 
+       SET address = $1, property_type = $2
+       WHERE id = $3 
        RETURNING *`,
-      [address, size, price, status, property_type, id]  // property_type als 5. Parameter
+      [address, property_type, id]
     );
     
     if (propertyResult.rows.length === 0) {
@@ -210,13 +215,20 @@ const updateProperty: RequestHandler = async (req, res) => {
     // Bestehende units löschen
     await client.query('DELETE FROM units WHERE property_id = $1', [id]);
 
-    // Neue units einfügen
+    // Neue units einfügen mit Default-Werten
     const unitPromises = units.map((unit: any) =>
       client.query(
         `INSERT INTO units (property_id, name, type, size, status, rent)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        [id, unit.name, unit.type, unit.size, unit.status, unit.rent]
+        [
+          id, 
+          unit.name, 
+          unit.type, 
+          unit.size || 0,
+          unit.status,
+          unit.status === 'besetzt' ? (unit.rent || 0) : 0  // Wenn besetzt, dann rent oder 0, sonst 0
+        ]
       )
     );
 
@@ -224,7 +236,6 @@ const updateProperty: RequestHandler = async (req, res) => {
     
     await client.query('COMMIT');
 
-    // Response zusammenbauen
     const response = {
       ...propertyResult.rows[0],
       units: unitsResults.map(result => result.rows[0])
@@ -579,25 +590,22 @@ export default tseslint.config({
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import PropertyList from './components/PropertyList'
-import NewPropertyForm from './components/PropertyForm'
-import EditPropertyForm from './components/EditPropertyForm'
-
+import PropertyForm from './components/PropertyForm'
+import EditPropertyWrapper from './components/EditPropertyWrapper' // Neu importiert
 
 function App() {
   return (
     <BrowserRouter>
-    
-        <Sidebar>
-          <Routes>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<div className="text-lg">Dashboard (Coming Soon)</div>} />
-            <Route path="/properties" element={<PropertyList />} />
-            <Route path="/new" element={<NewPropertyForm />} />
-            <Route path="/edit/:id" element={<EditPropertyForm />} />
-            <Route path="/settings" element={<div className="text-lg">Einstellungen (Coming Soon)</div>} />
-            </Routes>
-        </Sidebar>
-     
+      <Sidebar>
+        <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<div>Dashboard (Coming Soon)</div>} />
+          <Route path="/properties" element={<PropertyList />} />
+          <Route path="/new" element={<PropertyForm />} />
+          <Route path="/edit/:id" element={<EditPropertyWrapper />} /> {/* Hier den Wrapper verwenden */}
+          <Route path="/settings" element={<div>Einstellungen (Coming Soon)</div>} />
+        </Routes>
+      </Sidebar>
     </BrowserRouter>
   )
 }
@@ -609,11 +617,48 @@ export default App
 
 This is a file of the type: SVG Image
 
-# frontend/src/components/EditPropertyForm.tsx
+# frontend/src/components/EditPropertyWrapper.tsx
 
 ```tsx
-import { useState, useEffect } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+// src/components/EditPropertyWrapper.tsx
+import { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
+import PropertyForm from './PropertyForm';
+
+export default function EditPropertyWrapper() {
+  const { id } = useParams();
+  const [property, setProperty] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  useEffect(() => {
+    const loadProperty = async () => {
+      try {
+        const response = await fetch(`http://localhost:3001/properties/${id}`);
+        if (!response.ok) throw new Error('Laden fehlgeschlagen');
+        const data = await response.json();
+        setProperty(data);
+      } catch (error) {
+        console.error('Fehler beim Laden:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadProperty();
+  }, [id]);
+
+  if (isLoading) return <div>Lade...</div>;
+  if (!property) return <div>Immobilie nicht gefunden</div>;
+  
+  return <PropertyForm initialData={property} />;
+}
+```
+
+# frontend/src/components/PropertyForm.tsx
+
+```tsx
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -625,174 +670,179 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { propertyTypes } from '@/constants/PropertyTypes'
+import { propertyTypes, UNIT_TYPES, UNIT_STATUS } from '@/constants/propertyTypes'
 
-
+// Typdefinitionen
 interface Unit {
   id?: number
   name: string
-  type: string
-  size: number
-  status: string
-  rent: number
+  type: typeof UNIT_TYPES[number]
+  size: number | ''
+  status: typeof UNIT_STATUS[number]
+  rent?: number | ''
 }
 
 interface Property {
-  id: number
+  id?: number
   address: string
   size: number
   price: number
-  status: string
+  property_type: string
   units: Unit[]
 }
 
-export default function EditPropertyForm() {
-  const { id } = useParams()
+interface PropertyFormProps {
+  initialData?: Property
+}
+
+export default function PropertyForm({ initialData }: PropertyFormProps) {
   const navigate = useNavigate()
-  const [property, setProperty] = useState<Property | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  useEffect(() => {
-    const loadProperty = async () => {
-      try {
-        const response = await fetch(`http://localhost:3001/properties/${id}`)
-        if (!response.ok) throw new Error(await response.text())
-        const data = await response.json()
-        setProperty(data)
-      } catch (error) {
-        console.error('Fehler beim Laden:', error)
-        alert('Fehler beim Laden der Immobilie')
-      } finally {
-        setIsLoading(false)
-      }
-    }
-    loadProperty()
-  }, [id])
+  // Formular-State mit initialData oder Defaultwerten
+  const [property, setProperty] = useState<Property>(() => ({
+    address: initialData?.address || '',
+    size: initialData?.size || 0,
+    price: initialData?.price || 0,
+    property_type: initialData?.property_type || '',
+    units: initialData?.units || []
+  }))
 
+  // Unit Management Funktionen
   const addUnit = () => {
-    if (!property) return
-    
     const newUnit: Unit = {
       name: '',
       type: 'Wohnung',
-      size: 0,
-      status: 'frei',
-      rent: 0
+      size: '',
+      status: 'verfügbar',
+      rent: ''
     }
-    
-    setProperty({
-      ...property,
-      units: [...property.units, newUnit]
-    })
+    setProperty(prev => ({
+      ...prev,
+      units: [...prev.units, newUnit]
+    }))
   }
 
   const removeUnit = (index: number) => {
-    if (!property) return
-    setProperty({
-      ...property,
-      units: property.units.filter((_, i) => i !== index)
-    })
+    setProperty(prev => ({
+      ...prev,
+      units: prev.units.filter((_, i) => i !== index)
+    }))
   }
 
   const updateUnit = (index: number, field: keyof Unit, value: any) => {
-    if (!property) return
-    
-    const newUnits = [...property.units]
-    newUnits[index] = {
-      ...newUnits[index],
-      [field]: value
-    }
-    
-    setProperty({
-      ...property,
-      units: newUnits
-    })
+    setProperty(prev => ({
+      ...prev,
+      units: prev.units.map((unit, i) => {
+        if (i !== index) return unit;
+
+        // Wenn der Status von "besetzt" auf "verfügbar" wechselt, Miete zurücksetzen
+        if (field === 'status' && value === 'verfügbar') {
+          return { ...unit, [field]: value, rent: '' };
+        }
+
+        // Für numerische Felder
+        if (field === 'size' || field === 'rent') {
+          value = value === '' ? '' : Number(value);
+        }
+
+        return { ...unit, [field]: value };
+      })
+    }))
   }
 
+  // Form Submit Handler
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!property) return
     setIsSubmitting(true)
-    
+
+    // Konvertiere leere Strings zu 0
+    const submissionData = {
+      ...property,
+      units: property.units.map(unit => ({
+        ...unit,
+        size: unit.size === '' ? 0 : Number(unit.size),
+        rent: unit.rent === '' ? 0 : Number(unit.rent)
+      }))
+    }
+
     try {
-      const response = await fetch(`http://localhost:3001/properties/${id}`, {
-        method: 'PUT',
+      const url = initialData
+        ? `http://localhost:3001/properties/${initialData.id}`
+        : 'http://localhost:3001/properties'
+
+      const response = await fetch(url, {
+        method: initialData ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(property)
+        body: JSON.stringify(submissionData)
       })
 
-      if (!response.ok) throw new Error(await response.text())
+      if (!response.ok) throw new Error('Fehler beim Speichern')
       navigate('/properties')
     } catch (error) {
       console.error('Fehler beim Speichern:', error)
-      alert('Fehler beim Aktualisieren der Immobilie')
+      alert('Fehler beim Speichern der Immobilie')
     } finally {
       setIsSubmitting(false)
     }
   }
 
-  if (isLoading) return <div>Lade...</div>
-  if (!property) return <div>Immobilie nicht gefunden</div>
-
   return (
     <div className="p-4 max-w-4xl mx-auto">
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Immobilien-Hauptdaten */}
         <Card>
           <CardHeader>
-            <CardTitle>Immobilie bearbeiten</CardTitle>
+            <CardTitle>
+              {initialData ? 'Immobilie bearbeiten' : 'Neue Immobilie'}
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
+              {/* Adresse */}
               <div>
                 <label className="text-sm font-medium">Adresse</label>
                 <Input
+                  required
                   value={property.address}
-                  onChange={e => setProperty({...property, address: e.target.value})}
+                  onChange={e => setProperty({ ...property, address: e.target.value })}
                   className="mt-1"
                   disabled={isSubmitting}
                 />
               </div>
+
+              {/* Immobilientyp */}
               <div>
-                <label className="text-sm font-medium">Gesamtgröße (m²)</label>
-                <Input
-                  type="number"
-                  value={property.size}
-                  onChange={e => setProperty({...property, size: Number(e.target.value)})}
-                  className="mt-1"
-                  disabled={isSubmitting}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium">Preis (€)</label>
-                <Input
-                  type="number"
-                  value={property.price}
-                  onChange={e => setProperty({...property, price: Number(e.target.value)})}
-                  className="mt-1"
-                  disabled={isSubmitting}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium">Status</label>
-                <Input
-                  value={property.status}
-                  onChange={e => setProperty({...property, status: e.target.value})}
-                  className="mt-1"
-                  disabled={isSubmitting}
-                />
+                <label className="text-sm font-medium">Art der Immobilie</label>
+                <Select
+                  value={property.property_type}
+                  onValueChange={(value) => setProperty({ ...property, property_type: value })}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Bitte wählen..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {propertyTypes.map((type) => (
+                      <SelectItem key={type} value={type}>
+                        {type}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </CardContent>
         </Card>
 
+        {/* Einheiten */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Einheiten</CardTitle>
-            <Button 
+            <Button
               type="button"
               onClick={addUnit}
               className="flex items-center gap-2"
+              disabled={isSubmitting}
             >
               <Plus className="w-4 h-4" />
               Einheit hinzufügen
@@ -800,7 +850,7 @@ export default function EditPropertyForm() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {property.units?.map((unit, index) => (
+              {property.units.map((unit, index) => (
                 <Card key={index}>
                   <CardContent className="pt-4">
                     <div className="flex justify-between items-center mb-4">
@@ -810,12 +860,14 @@ export default function EditPropertyForm() {
                         variant="outline"
                         size="sm"
                         onClick={() => removeUnit(index)}
+                        disabled={isSubmitting}
                       >
                         <Trash className="w-4 h-4" />
                       </Button>
                     </div>
-                    
+
                     <div className="grid grid-cols-2 gap-4">
+                      {/* Name */}
                       <div>
                         <label className="text-sm font-medium">Name</label>
                         <Input
@@ -826,46 +878,72 @@ export default function EditPropertyForm() {
                           disabled={isSubmitting}
                         />
                       </div>
+
+                      {/* Typ */}
                       <div>
                         <label className="text-sm font-medium">Typ</label>
-                        <Input
+                        <Select
                           value={unit.type}
-                          onChange={e => updateUnit(index, 'type', e.target.value)}
-                          placeholder="z.B. Wohnung"
-                          className="mt-1"
-                          disabled={isSubmitting}
-                        />
+                          onValueChange={(value) => updateUnit(index, 'type', value)}
+                        >
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Bitte wählen..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {UNIT_TYPES.map((type) => (
+                              <SelectItem key={type} value={type}>
+                                {type}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
+
+                      {/* Größe */}
                       <div>
                         <label className="text-sm font-medium">Größe (m²)</label>
                         <Input
                           type="number"
-                          value={unit.size}
-                          onChange={e => updateUnit(index, 'size', Number(e.target.value))}
+                          value={unit.size === '' ? '' : unit.size}
+                          onChange={e => updateUnit(index, 'size', e.target.value || '')}
                           className="mt-1"
                           disabled={isSubmitting}
                         />
                       </div>
-                      <div>
-                        <label className="text-sm font-medium">Miete (€)</label>
-                        <Input
-                          type="number"
-                          value={unit.rent}
-                          onChange={e => updateUnit(index, 'rent', Number(e.target.value))}
-                          className="mt-1"
-                          disabled={isSubmitting}
-                        />
-                      </div>
+
+                      {/* Status */}
                       <div>
                         <label className="text-sm font-medium">Status</label>
-                        <Input
+                        <Select
                           value={unit.status}
-                          onChange={e => updateUnit(index, 'status', e.target.value)}
-                          placeholder="z.B. frei"
-                          className="mt-1"
-                          disabled={isSubmitting}
-                        />
+                          onValueChange={(value) => updateUnit(index, 'status', value)}
+                        >
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Bitte wählen..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {UNIT_STATUS.map((status) => (
+                              <SelectItem key={status} value={status}>
+                                {status}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
+
+                      {/* Miete - nur anzeigen wenn Status "besetzt" ist */}
+                      {unit.status === 'besetzt' && (
+                        <div>
+                          <label className="text-sm font-medium">Monatliche Miete (€)</label>
+                          <Input
+                            type="number"
+                            value={unit.rent === '' ? '' : unit.rent}
+                            onChange={e => updateUnit(index, 'rent', e.target.value || '')}
+                            className="mt-1"
+                            disabled={isSubmitting}
+                          />
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -874,15 +952,16 @@ export default function EditPropertyForm() {
           </CardContent>
         </Card>
 
+        {/* Formular-Buttons */}
         <div className="flex gap-4">
-          <Button 
-            type="submit" 
+          <Button
+            type="submit"
             disabled={isSubmitting}
           >
             {isSubmitting ? 'Wird gespeichert...' : 'Speichern'}
           </Button>
-          <Button 
-            type="button" 
+          <Button
+            type="button"
             variant="outline"
             onClick={() => navigate('/properties')}
             disabled={isSubmitting}
@@ -891,128 +970,6 @@ export default function EditPropertyForm() {
           </Button>
         </div>
       </form>
-    </div>
-  )
-}
-```
-
-# frontend/src/components/PropertyForm.tsx
-
-```tsx
-// PropertyForm.tsx
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { propertyTypes } from '@/constants/PropertyTypes'
-
-
-export default function PropertyForm() {
-  const navigate = useNavigate()
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [property, setProperty] = useState({
-    address: '',
-    size: '',
-    price: '',
-    status: 'available',
-    property_type: ''
-  })
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsSubmitting(true)
-  
-    try {
-      const response = await fetch('http://localhost:3001/properties', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...property,  // Dies behält alle Felder bei
-          size: Number(property.size),
-          price: Number(property.price)
-          // property_type wird jetzt nicht mehr herausgefiltert
-        })
-      })
-  
-      if (response.ok) {
-        navigate('/properties')
-      } else {
-        alert('Fehler beim Speichern der Immobilie')
-      }
-    } catch (err) {
-      console.error('Fehler beim Speichern:', err)
-      alert('Fehler beim Speichern der Immobilie')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  return (
-    <div className="p-4 max-w-2xl mx-auto">
-      <Card>
-        <CardHeader>
-          <CardTitle>Neue Immobilie hinzufügen</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="text-sm font-medium">Adresse</label>
-              <Input
-                required
-                value={property.address}
-                onChange={e => setProperty({ ...property, address: e.target.value })}
-                className="mt-1"
-              />
-            </div>
-
-            <div>
-              <label className="text-sm font-medium">Art der Immobilie</label>
-              <Select
-                value={property.property_type}
-                onValueChange={(value) => setProperty({ ...property, property_type: value })}
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Bitte wählen..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {propertyTypes.map((type) => (
-                    <SelectItem key={type} value={type}>
-                      {type}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-          
-
-            <div className="flex gap-4 pt-4">
-              <Button
-                type="submit"
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? 'Wird gespeichert...' : 'Speichern'}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => navigate('/properties')}
-                disabled={isSubmitting}
-              >
-                Abbrechen
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
     </div>
   )
 }
@@ -1041,7 +998,6 @@ type Property = {
   address: string
   size: number
   price: number
-  status: string
   property_type: string
   units: Unit[]
 }
@@ -1119,7 +1075,7 @@ export default function PropertyList() {
       {properties.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <p className="text-muted-foreground mb-4">Keine Immobilien vorhanden</p>
+            <p className="text-muted-foreground mb-4">Keine Immobilien vorhanden, Pul darbiar Azizam!</p>
             <Button
               onClick={() => navigate('/new')}
               className="flex items-center gap-2"
@@ -1260,7 +1216,7 @@ const Sidebar = ({ children }: SidebarProps) => {
         )}
       >
         <div className="flex items-center justify-between p-4 border-b border-gray-800">
-          {!collapsed && <span className="text-xl font-bold">Immo-App</span>}
+          {!collapsed && <span className="text-xl font-bold">Manager 06</span>}
           <Button
             variant="ghost"
             size="icon"
@@ -1610,102 +1566,57 @@ export {
 # frontend/src/constants/propertyTypes.ts
 
 ```ts
+// src/constants/propertyTypes.ts
+
+// Immobilientypen
 export const propertyTypes = [
-    'Einfamilienhaus',
-    'Mehrfamilienhaus', 
-    'Eigentumswohnung',
-    'Doppelhaushälfte',
-    'Reihenhaus',
-    'Villa'
-  ] as const
-```
+  'Einfamilienhaus',
+  'Mehrfamilienhaus', 
+  'Eigentumswohnung',
+  'Doppelhaushälfte',
+  'Reihenhaus',
+  'Villa'
+] as const;
 
-# frontend/src/hooks/useForms.tsx
+// Typen für Einheiten (Wohnungen/Gewerbe)
+export const UNIT_TYPES = [
+  'Wohnung',
+  'Gewerbe'
+] as const;
 
-```tsx
+// Status für Einheiten
+export const UNIT_STATUS = [
+  'verfügbar',
+  'besetzt'
+] as const;
 
-```
+// TypeScript Typ-Definitionen
+export type PropertyType = typeof propertyTypes[number];
+export type UnitType = typeof UNIT_TYPES[number];
+export type UnitStatus = typeof UNIT_STATUS[number];
 
-# frontend/src/hooks/useProperties.tsx
+// Interface für Property
+export interface Property {
+  id?: number;
+  address: string;
+  property_type: PropertyType;
+  units: Unit[];
+}
 
-```tsx
-// hooks/useProperties.ts
+// Interface für Unit
+export interface Unit {
+  id?: number;
+  name: string;
+  type: UnitType;
+  size: number | '';
+  status: UnitStatus;
+  rent?: number | '';
+}
 
-import { useState, useCallback } from 'react'
-import { Property, PropertyFormData } from '@/types/property'
-import { propertyService } from '@/services/propertyService'
-
-export function useProperties() {
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [properties, setProperties] = useState<Property[]>([])
-
-  const loadProperties = useCallback(async () => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const data = await propertyService.getAll()
-      setProperties(data)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ein Fehler ist aufgetreten')
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
-
-  const createProperty = async (data: PropertyFormData) => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const newProperty = await propertyService.create(data)
-      setProperties(prev => [...prev, newProperty])
-      return newProperty
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ein Fehler ist aufgetreten')
-      throw err
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const updateProperty = async (id: string, data: PropertyFormData) => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const updatedProperty = await propertyService.update(id, data)
-      setProperties(prev => prev.map(p => p.id === Number(id) ? updatedProperty : p))
-      return updatedProperty
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ein Fehler ist aufgetreten')
-      throw err
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const deleteProperty = async (id: number) => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      await propertyService.delete(id)
-      setProperties(prev => prev.filter(p => p.id !== id))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ein Fehler ist aufgetreten')
-      throw err
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  return {
-    properties,
-    isLoading,
-    error,
-    loadProperties,
-    createProperty,
-    updateProperty,
-    deleteProperty
-  }
+// Interface für API-Antworten
+export interface ApiResponse<T> {
+  data?: T;
+  error?: string;
 }
 ```
 
@@ -1812,88 +1723,42 @@ createRoot(document.getElementById('root')!).render(
 
 ```
 
-# frontend/src/services/propertyService.ts
-
-```ts
-// services/propertyService.ts
-
-import { Property, PropertyFormData } from '@/types/property'
-
-const API_URL = 'http://localhost:3001/properties'
-
-export const propertyService = {
-  // Alle Properties laden
-  async getAll(): Promise<Property[]> {
-    const response = await fetch(API_URL)
-    if (!response.ok) throw new Error('Failed to fetch properties')
-    return response.json()
-  },
-
-  // Eine Property laden
-  async getById(id: string): Promise<Property> {
-    const response = await fetch(`${API_URL}/${id}`)
-    if (!response.ok) throw new Error('Failed to fetch property')
-    return response.json()
-  },
-
-  // Neue Property erstellen
-  async create(data: PropertyFormData): Promise<Property> {
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    })
-    if (!response.ok) throw new Error('Failed to create property')
-    return response.json()
-  },
-
-  // Property aktualisieren
-  async update(id: string, data: PropertyFormData): Promise<Property> {
-    const response = await fetch(`${API_URL}/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    })
-    if (!response.ok) throw new Error('Failed to update property')
-    return response.json()
-  },
-
-  // Property löschen
-  async delete(id: number): Promise<void> {
-    const response = await fetch(`${API_URL}/${id}`, {
-      method: 'DELETE'
-    })
-    if (!response.ok) throw new Error('Failed to delete property')
-  }
-}
-```
-
 # frontend/src/types/property.ts
 
 ```ts
 // types/property.ts
 
+export interface Property {
+  id?: number;
+  address: string;
+  size: number;
+  price: number;
+  property_type: string;
+  units: Unit[];
+}
+
 export interface Unit {
-    id?: number
-    name: string
-    type: string
-    size: number
-    status: string
-    rent: number
-  }
-  
-  export interface Property {
-    id?: number
-    address: string
-    size: number
-    price: number
-    status: string
-    units?: Unit[]
-  }
-  
-  export interface PropertyFormData extends Omit<Property, 'id'> {
-    units?: Omit<Unit, 'id'>[]
-  }
+  id?: number;
+  name: string;
+  type: string;
+  size: number;
+  status: string;
+  rent: number;
+}
+
+export interface PropertyFormData {
+  address: string;
+  size: number | string;
+  price: number | string;
+  status: string;
+  property_type: string;
+  units?: Unit[];
+}
+
+export interface ApiResponse<T> {
+  data?: T;
+  error?: string;
+}
 ```
 
 # frontend/src/vite-env.d.ts

@@ -1,5 +1,3 @@
-// src/components/PropertyForm.tsx
-
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,17 +11,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { propertyTypes } from '@/constants/propertyTypes'
+import { propertyTypes, UNIT_TYPES, UNIT_STATUS } from '@/constants/propertyTypes'
 
 // Typdefinitionen
-// Aktualisiertes Unit Interface
 interface Unit {
   id?: number
   name: string
-  type: string
-  size: number | '' // erlaubt sowohl Zahlen als auch leeren String
-  status: string
-  rent: number | '' // erlaubt sowohl Zahlen als auch leeren String
+  type: typeof UNIT_TYPES[number]
+  size: number | ''
+  status: typeof UNIT_STATUS[number]
+  rent?: number | ''
 }
 
 interface Property {
@@ -31,12 +28,10 @@ interface Property {
   address: string
   size: number
   price: number
-  status: string
   property_type: string
   units: Unit[]
 }
 
-// Props Interface für die Komponente
 interface PropertyFormProps {
   initialData?: Property
 }
@@ -50,7 +45,6 @@ export default function PropertyForm({ initialData }: PropertyFormProps) {
     address: initialData?.address || '',
     size: initialData?.size || 0,
     price: initialData?.price || 0,
-    status: initialData?.status || 'verfügbar',
     property_type: initialData?.property_type || '',
     units: initialData?.units || []
   }))
@@ -60,9 +54,9 @@ export default function PropertyForm({ initialData }: PropertyFormProps) {
     const newUnit: Unit = {
       name: '',
       type: 'Wohnung',
-      size: '', // Jetzt ein valider leerer String
-      status: 'frei',
-      rent: ''  // Jetzt ein valider leerer String
+      size: '',
+      status: 'verfügbar',
+      rent: ''
     }
     setProperty(prev => ({
       ...prev,
@@ -82,10 +76,17 @@ export default function PropertyForm({ initialData }: PropertyFormProps) {
       ...prev,
       units: prev.units.map((unit, i) => {
         if (i !== index) return unit;
-        // Konvertiere leere Strings zu 0 für numerische Felder
+
+        // Wenn der Status von "besetzt" auf "verfügbar" wechselt, Miete zurücksetzen
+        if (field === 'status' && value === 'verfügbar') {
+          return { ...unit, [field]: value, rent: '' };
+        }
+
+        // Für numerische Felder
         if (field === 'size' || field === 'rent') {
           value = value === '' ? '' : Number(value);
         }
+
         return { ...unit, [field]: value };
       })
     }))
@@ -114,11 +115,10 @@ export default function PropertyForm({ initialData }: PropertyFormProps) {
       const response = await fetch(url, {
         method: initialData ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(submissionData) // Verwende die konvertierte Version
+        body: JSON.stringify(submissionData)
       })
 
       if (!response.ok) throw new Error('Fehler beim Speichern')
-
       navigate('/properties')
     } catch (error) {
       console.error('Fehler beim Speichern:', error)
@@ -127,7 +127,6 @@ export default function PropertyForm({ initialData }: PropertyFormProps) {
       setIsSubmitting(false)
     }
   }
-
 
   return (
     <div className="p-4 max-w-4xl mx-auto">
@@ -172,17 +171,6 @@ export default function PropertyForm({ initialData }: PropertyFormProps) {
                   </SelectContent>
                 </Select>
               </div>
-
-              {/* Status */}
-              <div>
-                <label className="text-sm font-medium">Status</label>
-                <Input
-                  value={property.status}
-                  onChange={e => setProperty({ ...property, status: e.target.value })}
-                  className="mt-1"
-                  disabled={isSubmitting}
-                />
-              </div>
             </div>
           </CardContent>
         </Card>
@@ -220,6 +208,7 @@ export default function PropertyForm({ initialData }: PropertyFormProps) {
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
+                      {/* Name */}
                       <div>
                         <label className="text-sm font-medium">Name</label>
                         <Input
@@ -230,48 +219,72 @@ export default function PropertyForm({ initialData }: PropertyFormProps) {
                           disabled={isSubmitting}
                         />
                       </div>
+
+                      {/* Typ */}
                       <div>
                         <label className="text-sm font-medium">Typ</label>
-                        <Input
+                        <Select
                           value={unit.type}
-                          onChange={e => updateUnit(index, 'type', e.target.value)}
-                          placeholder="z.B. Wohnung"
-                          className="mt-1"
-                          disabled={isSubmitting}
-                        />
+                          onValueChange={(value) => updateUnit(index, 'type', value)}
+                        >
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Bitte wählen..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {UNIT_TYPES.map((type) => (
+                              <SelectItem key={type} value={type}>
+                                {type}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
+
+                      {/* Größe */}
                       <div>
                         <label className="text-sm font-medium">Größe (m²)</label>
                         <Input
                           type="number"
-                          value={unit.size === '' ? '' : unit.size} // Jetzt TypeScript-konform
+                          value={unit.size === '' ? '' : unit.size}
                           onChange={e => updateUnit(index, 'size', e.target.value || '')}
                           className="mt-1"
                           disabled={isSubmitting}
                         />
-
-
                       </div>
-                      <div>
-                        <label className="text-sm font-medium">Miete (€)</label>
-                        <Input
-                          type="number"
-                          value={unit.rent === '' ? '' : unit.rent} // Jetzt TypeScript-konform
-                          onChange={e => updateUnit(index, 'rent', e.target.value || '')}
-                          className="mt-1"
-                          disabled={isSubmitting}
-                        />
-                      </div>
+
+                      {/* Status */}
                       <div>
                         <label className="text-sm font-medium">Status</label>
-                        <Input
+                        <Select
                           value={unit.status}
-                          onChange={e => updateUnit(index, 'status', e.target.value)}
-                          placeholder="z.B. frei"
-                          className="mt-1"
-                          disabled={isSubmitting}
-                        />
+                          onValueChange={(value) => updateUnit(index, 'status', value)}
+                        >
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Bitte wählen..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {UNIT_STATUS.map((status) => (
+                              <SelectItem key={status} value={status}>
+                                {status}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
+
+                      {/* Miete - nur anzeigen wenn Status "besetzt" ist */}
+                      {unit.status === 'besetzt' && (
+                        <div>
+                          <label className="text-sm font-medium">Monatliche Miete (€)</label>
+                          <Input
+                            type="number"
+                            value={unit.rent === '' ? '' : unit.rent}
+                            onChange={e => updateUnit(index, 'rent', e.target.value || '')}
+                            className="mt-1"
+                            disabled={isSubmitting}
+                          />
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
