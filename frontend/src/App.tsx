@@ -1,24 +1,56 @@
+// src/App.tsx
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { Providers } from "@/components/providers"
 import Sidebar from './components/Sidebar'
-import PropertyList from './components/PropertyList'
-import PropertyForm from './components/PropertyForm'
-import EditPropertyWrapper from './components/EditPropertyWrapper' // Neu importiert
 import Dashboard from './components/Dashboard'
+import PropertyList from './components/Immobilien/PropertyList'
+import PropertyForm from './components/Immobilien/PropertyForm'
+import EditPropertyWrapper from './components/Immobilien/EditPropertyWrapper'
+import TenantList from './components/Mieter/TenantList'
+import TenantForm from './components/Mieter/TenantForm'
+import TenantEditWrapper from './components/Mieter/TenantEditWrapper'
+import DocumentList from './components/Dokumente/DocumentList'
+import DocumentDetail from './components/Dokumente/DocumentDetail'
+import DocumentUpload from './components/Dokumente/DocumentUpload'
+import WorkerList from './components/Mitarbeiter/WorkerList'
+import WorkerForm from './components/Mitarbeiter/WorkerForm'
+import WorkerEditWrapper from './components/Mitarbeiter/WorkerEditWrapper'
 
 function App() {
   return (
-    <BrowserRouter>
-      <Sidebar>
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/properties" element={<PropertyList />} />
-          <Route path="/new" element={<PropertyForm />} />
-          <Route path="/edit/:id" element={<EditPropertyWrapper />} /> {/* Hier den Wrapper verwenden */}
-          <Route path="/settings" element={<div>Einstellungen (Coming Soon)</div>} />
-        </Routes>
-      </Sidebar>
-    </BrowserRouter>
+    <Providers>
+      <BrowserRouter>
+        <Sidebar>
+          <Routes>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            
+            {/* Property Routes */}
+            <Route path="/properties" element={<PropertyList />} />
+            <Route path="/properties/new" element={<PropertyForm />} />
+            <Route path="/properties/edit/:id" element={<EditPropertyWrapper />} />
+            
+            {/* Tenant Routes */}
+            <Route path="/tenants" element={<TenantList />} />
+            <Route path="/tenants/new" element={<TenantForm />} />
+            <Route path="/tenants/edit/:id" element={<TenantEditWrapper />} />
+            
+            {/* Document Routes */}
+            <Route path="/documents" element={<DocumentList />} />
+            <Route path="/documents/upload" element={<DocumentUpload />} />
+            <Route path="/documents/:id" element={<DocumentDetail />} />
+            
+            {/* Worker Routes */}
+            <Route path="/workers" element={<WorkerList />} />
+            <Route path="/workers/new" element={<WorkerForm />} />
+            <Route path="/workers/edit/:id" element={<WorkerEditWrapper />} />
+            
+            {/* Settings */}
+            <Route path="/settings" element={<div>Einstellungen (Coming Soon)</div>} />
+          </Routes>
+        </Sidebar>
+      </BrowserRouter>
+    </Providers>
   )
 }
 

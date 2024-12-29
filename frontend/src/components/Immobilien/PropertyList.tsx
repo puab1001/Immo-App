@@ -114,7 +114,7 @@ export default function PropertyList() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => navigate(`/edit/${property.id}`)}
+                      onClick={() => navigate(`/properties/edit/${property.id}`)} // Korrigierter Pfad
                       disabled={isDeleting === property.id}
                     >
                       <Pencil className="w-4 h-4" />

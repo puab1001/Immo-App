@@ -1,8 +1,18 @@
+// src/components/Sidebar.tsx
 import { useState } from 'react'
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { ChevronRight, HomeIcon, Building2, Settings, Menu } from "lucide-react"
 import { Link, useLocation } from 'react-router-dom'
+import { 
+  ChevronRight, 
+  HomeIcon, 
+  Building2, 
+  Settings, 
+  Menu, 
+  Users,
+  FileText,
+  Wrench  // Neues Icon für Handwerker
+} from 'lucide-react';
 
 interface SidebarProps {
   children: React.ReactNode
@@ -24,11 +34,26 @@ const Sidebar = ({ children }: SidebarProps) => {
       href: "/properties"
     },
     {
+      title: "Mieter",
+      icon: <Users />,
+      href: "/tenants"
+    },
+    {
+      title: "Mitarbeiter",  // Neuer Menüpunkt
+      icon: <Wrench />,
+      href: "/workers"
+    },
+    {
+      title: "Dokumente",
+      icon: <FileText />, 
+      href: "/documents"
+    },
+    {
       title: "Einstellungen",
       icon: <Settings />,
       href: "/settings"
     }
-  ]
+  ];
 
   return (
     <div className="flex min-h-screen">
@@ -72,7 +97,7 @@ const Sidebar = ({ children }: SidebarProps) => {
         </nav>
       </div>
 
-      <main 
+      <main
         className={cn(
           "flex-1 transition-all duration-300",
           collapsed ? "ml-16" : "ml-64"

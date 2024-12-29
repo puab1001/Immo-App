@@ -37,6 +37,7 @@ interface PropertyFormProps {
 }
 
 export default function PropertyForm({ initialData }: PropertyFormProps) {
+  console.log('PropertyForm received initialData:', initialData); // Logging
   const navigate = useNavigate()
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -314,3 +315,4 @@ export default function PropertyForm({ initialData }: PropertyFormProps) {
     </div>
   )
 }
+
