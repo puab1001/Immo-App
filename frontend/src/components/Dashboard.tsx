@@ -1,6 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Building2, Home, Currency, AlertCircle } from 'lucide-react';
+import { useAsync } from '@/hooks/useAsync';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { EmptyState } from '@/components/ui/EmptyState';
 
 interface DashboardStats {
     total_properties: number;
@@ -22,27 +26,40 @@ interface DashboardStats {
 }
 
 export default function Dashboard() {
-    const [stats, setStats] = useState<DashboardStats | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
-
-    useEffect(() => {
-        const fetchDashboardStats = async () => {
-            try {
-                const response = await fetch('http://localhost:3001/dashboard/stats');
-                const data = await response.json();
-                setStats(data);
-            } catch (error) {
-                console.error('Fehler beim Laden der Dashboard-Daten:', error);
-            } finally {
-                setIsLoading(false);
+    const { execute: fetchDashboardStats, data: stats, isLoading, error } = useAsync<DashboardStats>(
+        async () => {
+            const response = await fetch('http://localhost:3001/dashboard/stats');
+            if (!response.ok) {
+                throw new Error('Fehler beim Laden der Dashboard-Daten');
             }
-        };
+            return await response.json();
+        },
+        {
+            errorMessage: 'Fehler beim Laden der Dashboard-Daten',
+            autoExecute: true
+        }
+    );
 
-        fetchDashboardStats();
-    }, []);
-
-    if (isLoading) return <div>Lade Dashboard...</div>;
-    if (!stats) return <div>Keine Daten verfügbar</div>;
+    if (isLoading) return <LoadingState />;
+    
+    if (error) {
+        return (
+            <ErrorState
+                title="Fehler beim Laden"
+                message="Die Dashboard-Daten konnten nicht geladen werden."
+                onRetry={fetchDashboardStats}
+            />
+        );
+    }
+    
+    if (!stats) {
+        return (
+            <EmptyState
+                title="Keine Daten verfügbar"
+                description="Es sind noch keine Dashboard-Daten vorhanden."
+            />
+        );
+    }
 
     return (
         <div className="p-4 space-y-6">

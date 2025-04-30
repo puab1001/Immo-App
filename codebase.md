@@ -17,6 +17,7 @@
   "description": "",
   "dependencies": {
     "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
     "multer": "^1.4.5-lts.1",
     "pg": "^8.13.1"
   },
@@ -30,7 +31,10 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   }
+  
 }
+
+
 
 ```
 
@@ -44,7 +48,11 @@ import { Pool } from 'pg';
 import { createPropertyRoutes } from './routes/properties';
 import { createTenantRoutes } from './routes/tenants';
 import { createDocumentRoutes } from './routes/documents';
-import { createWorkerRoutes } from './routes/workers'; // Neuer Import
+import { createWorkerRoutes } from './routes/workers';
+import dotenv from 'dotenv';
+
+// Lade Umgebungsvariablen
+dotenv.config();
 
 const app = express();
 
@@ -54,12 +62,13 @@ app.use(express.json());
 
 // Datenbank-Verbindung
 const db = new Pool({
-  user: 'postgres',
-  password: 'Avintuk178_7!',
-  host: 'localhost',
-  port: 5432,
-  database: 'immo-db'
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  host: process.env.DB_HOST,
+  port: parseInt(process.env.DB_PORT || '5432'),
+  database: process.env.DB_NAME
 });
+
 
 console.log('Versuche Datenbankverbindung aufzubauen...');
 db.connect().then(() => {
@@ -72,7 +81,7 @@ db.connect().then(() => {
 app.use('/properties', createPropertyRoutes(db));
 app.use('/tenants', createTenantRoutes(db));
 app.use('/documents', createDocumentRoutes(db));
-app.use('/workers', createWorkerRoutes(db)); // Neue Route
+app.use('/workers', createWorkerRoutes(db));
 
 // Dashboard Statistiken Endpunkt
 app.get('/dashboard/stats', (_req, res) => {
@@ -80,16 +89,16 @@ app.get('/dashboard/stats', (_req, res) => {
     try {
       // Gesamtanzahl Immobilien
       const propertiesCount = await db.query('SELECT COUNT(*) FROM properties');
-
+      
       // Gesamtanzahl Wohneinheiten
       const unitsCount = await db.query('SELECT COUNT(*) FROM units');
-
+      
       // Monatliche Gesamtmiete
       const totalRent = await db.query(
         'SELECT COALESCE(SUM(rent), 0) FROM units WHERE status = $1', 
         ['besetzt']
       );
-
+      
       // Leerstehende Einheiten
       const vacantUnits = await db.query(`
         SELECT u.*, p.address as property_address
@@ -97,18 +106,18 @@ app.get('/dashboard/stats', (_req, res) => {
         JOIN properties p ON u.property_id = p.id
         WHERE u.status = $1
       `, ['verfügbar']);
-
-      // Aktive Handwerker (NEU)
+      
+      // Aktive Handwerker
       const workersCount = await db.query(
         'SELECT COUNT(*) FROM workers WHERE active = true'
       );
-
+      
       res.json({
         total_properties: propertiesCount.rows[0].count,
         total_units: unitsCount.rows[0].count,
         monthly_rent: totalRent.rows[0].coalesce,
         vacant_units: vacantUnits.rows,
-        active_workers: workersCount.rows[0].count // NEU
+        active_workers: workersCount.rows[0].count
       });
     } catch (error) {
       console.error('Dashboard Statistiken Fehler:', error);
@@ -118,7 +127,7 @@ app.get('/dashboard/stats', (_req, res) => {
 });
 
 // Server starten
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server läuft auf Port ${PORT}`);
 });
@@ -127,10 +136,12 @@ app.listen(PORT, () => {
 # backend/src/routes/documents.ts
 
 ```ts
+// backend/src/routes/documents.ts (mit Preview-Endpunkt)
 import express, { Request, Response } from 'express';
 import multer from 'multer';
 import { Pool } from 'pg';
 import { DocumentService } from '../services/DocumentService';
+import path from 'path';
 
 const upload = multer({
  storage: multer.memoryStorage(),
@@ -263,6 +274,41 @@ export const createDocumentRoutes = (db: Pool) => {
      } catch (error) {
        console.error('Error uploading document:', error);
        res.status(500).json({ error: 'Error uploading document' });
+     }
+   })();
+ });
+
+ // GET: Dokument-Vorschau
+ router.get('/:id/preview', (req: Request, res: Response) => {
+   (async () => {
+     try {
+       const id = parseInt(req.params.id);
+       if (isNaN(id)) {
+         return res.status(400).json({ error: 'Invalid document ID' });
+       }
+
+       const document = await documentService.getDocument(id, { withContent: true });
+       if (!document) {
+         return res.status(404).json({ error: 'Document not found' });
+       }
+
+       // Bei Bildern und PDFs können wir Vorschau als Original zurückgeben
+       if (document.mime_type.startsWith('image/') || document.mime_type === 'application/pdf') {
+         res.set({
+           'Content-Type': document.mime_type,
+           'Content-Length': document.content?.length,
+         });
+         
+         res.send(document.content);
+         return;
+       }
+
+       // Für andere Dateitypen eine generische Vorschau zurückgeben
+       // Hier könnten Sie bei Bedarf Thumbnails für verschiedene Dateitypen generieren
+       res.status(415).json({ error: 'No preview available for this file type' });
+     } catch (error) {
+       console.error('Error generating preview:', error);
+       res.status(500).json({ error: 'Error generating document preview' });
      }
    })();
  });
@@ -1431,7 +1477,7 @@ export default tseslint.config(
     "@radix-ui/react-alert-dialog": "^1.1.4",
     "@radix-ui/react-select": "^2.1.4",
     "@radix-ui/react-slot": "^1.1.1",
-    "@radix-ui/react-toast": "^1.2.4",
+    "@radix-ui/react-toast": "^1.2.10",
     "@radix-ui/react-tooltip": "^1.1.6",
     "@shadcn/ui": "^0.0.4",
     "class-variance-authority": "^0.7.1",
@@ -1653,9 +1699,13 @@ This is a file of the type: SVG Image
 # frontend/src/components/Dashboard.tsx
 
 ```tsx
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Building2, Home, Currency, AlertCircle } from 'lucide-react';
+import { useAsync } from '@/hooks/useAsync';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { EmptyState } from '@/components/ui/EmptyState';
 
 interface DashboardStats {
     total_properties: number;
@@ -1677,27 +1727,40 @@ interface DashboardStats {
 }
 
 export default function Dashboard() {
-    const [stats, setStats] = useState<DashboardStats | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
-
-    useEffect(() => {
-        const fetchDashboardStats = async () => {
-            try {
-                const response = await fetch('http://localhost:3001/dashboard/stats');
-                const data = await response.json();
-                setStats(data);
-            } catch (error) {
-                console.error('Fehler beim Laden der Dashboard-Daten:', error);
-            } finally {
-                setIsLoading(false);
+    const { execute: fetchDashboardStats, data: stats, isLoading, error } = useAsync<DashboardStats>(
+        async () => {
+            const response = await fetch('http://localhost:3001/dashboard/stats');
+            if (!response.ok) {
+                throw new Error('Fehler beim Laden der Dashboard-Daten');
             }
-        };
+            return await response.json();
+        },
+        {
+            errorMessage: 'Fehler beim Laden der Dashboard-Daten',
+            autoExecute: true
+        }
+    );
 
-        fetchDashboardStats();
-    }, []);
-
-    if (isLoading) return <div>Lade Dashboard...</div>;
-    if (!stats) return <div>Keine Daten verfügbar</div>;
+    if (isLoading) return <LoadingState />;
+    
+    if (error) {
+        return (
+            <ErrorState
+                title="Fehler beim Laden"
+                message="Die Dashboard-Daten konnten nicht geladen werden."
+                onRetry={fetchDashboardStats}
+            />
+        );
+    }
+    
+    if (!stats) {
+        return (
+            <EmptyState
+                title="Keine Daten verfügbar"
+                description="Es sind noch keine Dashboard-Daten vorhanden."
+            />
+        );
+    }
 
     return (
         <div className="p-4 space-y-6">
@@ -1786,17 +1849,13 @@ export default function Dashboard() {
 # frontend/src/components/Dokumente/DocumentDetail.tsx
 
 ```tsx
+// src/components/Dokumente/DocumentDetail.tsx
 import { useState, useEffect } from 'react';
-import { downloadFile } from '@/lib/downloads';
 import { useParams, useNavigate } from 'react-router-dom';
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
+  FileText,
   Download,
   Pencil,
   Trash2,
@@ -1806,125 +1865,175 @@ import {
   Lock,
   File,
   Eye,
-  Clock
+  Filter,
+  ArrowLeft,
+  XCircle
 } from 'lucide-react';
-
-interface Document {
-  id: number;
-  filename: string;
-  original_filename: string;
-  mime_type: string;
-  file_size: number;
-  upload_date: string;
-  last_modified: string;
-  category_name: string;
-  description?: string;
-  is_confidential: boolean;
-  created_by: string;
-  tenant?: {
-    id: number;
-    first_name: string;
-    last_name: string;
-  };
-  tags: string[];
-}
+import { Document } from '@/types/document';
+import { useAsync } from '@/hooks/useAsync';
+import { useConfirmation } from '@/hooks/useConfirmation';
+import { DocumentService } from '@/services/DocumentService';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { formatFileSize, formatDate } from '@/lib/formatters';
+import { downloadFile } from '@/lib/downloads';
 
 export default function DocumentDetail() {
-  const { id } = useParams();
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [document, setDocument] = useState<Document | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [showPreview, setShowPreview] = useState(false);
+  const [documentData, setDocumentData] = useState<Document | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
+  const { execute: fetchDocument, isLoading, error } = useAsync(
+    () => DocumentService.getById(Number(id)),
+    {
+      errorMessage: 'Fehler beim Laden des Dokuments'
+    }
+  );
+
+  const confirmDelete = useConfirmation({
+    title: 'Dokument löschen?',
+    message: 'Möchten Sie dieses Dokument wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.',
+    confirmText: 'Löschen',
+    cancelText: 'Abbrechen'
+  });
+
   useEffect(() => {
-    loadDocument();
+    if (id) {
+      loadDocument();
+    }
   }, [id]);
+
+  // Aufräumen der URL beim Komponentenabbau
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
+
+  const { execute: fetchPreview, isLoading: isLoadingPreview, error: previewError } = useAsync(
+    async (documentId: number) => {
+      const blob = await DocumentService.getPreview(documentId);
+      return URL.createObjectURL(blob);
+    },
+    {
+      errorMessage: 'Fehler beim Laden der Vorschau',
+      showErrorToast: true
+    }
+  );
 
   const loadDocument = async () => {
     try {
-      const response = await fetch(`http://localhost:3001/documents/${id}`);
-      if (!response.ok) throw new Error('Laden fehlgeschlagen');
-      const data = await response.json();
-      setDocument(data);
-
-      // Wenn es sich um ein PDF oder Bild handelt, generiere Preview URL
-      if (data.mime_type.startsWith('image/') || data.mime_type === 'application/pdf') {
-        const previewResponse = await fetch(`http://localhost:3001/documents/${id}/preview`);
-        if (previewResponse.ok) {
-          const blob = await previewResponse.blob();
-          setPreviewUrl(URL.createObjectURL(blob));
-        }
+      const data = await fetchDocument();
+      setDocumentData(data);
+      if (data.id) {
+        const previewUrl = await fetchPreview(data.id);
+        setPreviewUrl(previewUrl);
       }
     } catch (error) {
       console.error('Fehler beim Laden:', error);
-    } finally {
-      setIsLoading(false);
     }
   };
 
   const handleDownload = async () => {
+    if (!documentData || !id) return;
+
     try {
-      const response = await fetch(`http://localhost:3001/documents/${id}/download`);
+      const response = await fetch(DocumentService.getDownloadUrl(Number(id)));
+      
+      if (!response.ok) {
+        throw new Error('Download fehlgeschlagen');
+      }
+      
       const blob = await response.blob();
-      downloadFile(blob, document?.original_filename || 'document');
+      const filename = documentData.original_filename;
+      
+      // Nutzen der Download-Hilfsfunktion statt direkter DOM-Manipulation
+      downloadFile(blob, filename);
     } catch (error) {
       console.error('Fehler beim Download:', error);
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm('Möchten Sie dieses Dokument wirklich löschen?')) return;
+    if (!documentData) return;
+
+    const confirmed = await confirmDelete.confirm();
+    if (!confirmed) return;
 
     try {
-      const response = await fetch(`http://localhost:3001/documents/${id}`, {
-        method: 'DELETE'
-      });
-      
-      if (!response.ok) throw new Error('Löschen fehlgeschlagen');
-      
+      await DocumentService.delete(documentData.id);
       navigate('/documents');
     } catch (error) {
       console.error('Fehler beim Löschen:', error);
     }
   };
 
-  if (isLoading) return <div>Lade Dokument...</div>;
-  if (!document) return <div>Dokument nicht gefunden</div>;
+  if (isLoading) {
+    return <LoadingState />;
+  }
+
+  if (error || !documentData) {
+    return (
+      <ErrorState
+        title="Fehler beim Laden"
+        message={error?.message || 'Dokument nicht gefunden'}
+        onRetry={loadDocument}
+      />
+    );
+  }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* Header mit Aktionen */}
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-2xl font-bold">{document.original_filename}</h1>
-          <p className="text-muted-foreground">{document.category_name}</p>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            className="flex items-center gap-2"
-            onClick={handleDownload}
-          >
-            <Download className="w-4 h-4" />
-            Download
-          </Button>
-          <Button
-            variant="outline"
-            className="flex items-center gap-2"
-            onClick={() => navigate(`/documents/${id}/edit`)}
-          >
-            <Pencil className="w-4 h-4" />
-            Bearbeiten
-          </Button>
-          <Button
-            variant="outline"
-            className="flex items-center gap-2"
-            onClick={handleDelete}
-          >
-            <Trash2 className="w-4 h-4" />
-            Löschen
-          </Button>
+    <div className="p-4 max-w-5xl mx-auto">
+      {/* Header */}
+      <div className="mb-6">
+        <Button
+          variant="ghost"
+          onClick={() => navigate('/documents')}
+          className="mb-4"
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Zurück zur Übersicht
+        </Button>
+        
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <FileText className="w-6 h-6" />
+              {documentData.original_filename}
+            </h1>
+            <p className="text-muted-foreground mt-1">
+              {documentData.category_name}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="flex items-center gap-2"
+              onClick={handleDownload}
+            >
+              <Download className="w-4 h-4" />
+              Download
+            </Button>
+            <Button
+              variant="outline"
+              className="flex items-center gap-2"
+              onClick={() => navigate(`/documents/${documentData.id}/edit`)}
+            >
+              <Pencil className="w-4 h-4" />
+              Bearbeiten
+            </Button>
+            <Button
+              variant="outline"
+              className="flex items-center gap-2"
+              onClick={handleDelete}
+            >
+              <Trash2 className="w-4 h-4" />
+              Löschen
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -1942,7 +2051,7 @@ export default function DocumentDetail() {
                 <File className="w-4 h-4 text-muted-foreground" />
                 <div>
                   <p className="text-sm text-muted-foreground">Dateityp</p>
-                  <p>{document.mime_type}</p>
+                  <p>{documentData.mime_type}</p>
                 </div>
               </div>
 
@@ -1950,15 +2059,7 @@ export default function DocumentDetail() {
                 <Calendar className="w-4 h-4 text-muted-foreground" />
                 <div>
                   <p className="text-sm text-muted-foreground">Hochgeladen am</p>
-                  <p>{new Date(document.upload_date).toLocaleDateString()}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-muted-foreground" />
-                <div>
-                  <p className="text-sm text-muted-foreground">Zuletzt geändert</p>
-                  <p>{new Date(document.last_modified).toLocaleDateString()}</p>
+                  <p>{formatDate(documentData.upload_date)}</p>
                 </div>
               </div>
 
@@ -1966,23 +2067,31 @@ export default function DocumentDetail() {
                 <User className="w-4 h-4 text-muted-foreground" />
                 <div>
                   <p className="text-sm text-muted-foreground">Erstellt von</p>
-                  <p>{document.created_by}</p>
+                  <p>{documentData.created_by}</p>
                 </div>
               </div>
 
-              {document.tenant && (
+              <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-muted-foreground" />
+                <div>
+                  <p className="text-sm text-muted-foreground">Kategorie</p>
+                  <p>{documentData.category_name}</p>
+                </div>
+              </div>
+
+              {documentData.tenant && (
                 <div className="flex items-center gap-2">
                   <User className="w-4 h-4 text-muted-foreground" />
                   <div>
                     <p className="text-sm text-muted-foreground">Zugeordneter Mieter</p>
                     <p>
-                      {document.tenant.first_name} {document.tenant.last_name}
+                      {documentData.tenant.first_name} {documentData.tenant.last_name}
                     </p>
                   </div>
                 </div>
               )}
 
-              {document.is_confidential && (
+              {documentData.is_confidential && (
                 <div className="flex items-center gap-2 text-red-600">
                   <Lock className="w-4 h-4" />
                   <p>Vertrauliches Dokument</p>
@@ -1992,14 +2101,14 @@ export default function DocumentDetail() {
           </Card>
 
           {/* Tags */}
-          {document.tags.length > 0 && (
+          {documentData.tags && documentData.tags.length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle>Tags</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap gap-2">
-                  {document.tags.map((tag, index) => (
+                  {documentData.tags.map((tag, index) => (
                     <span
                       key={index}
                       className="inline-flex items-center gap-1 px-2 py-1 bg-secondary rounded-md text-sm"
@@ -2014,13 +2123,13 @@ export default function DocumentDetail() {
           )}
 
           {/* Beschreibung */}
-          {document.description && (
+          {documentData.description && (
             <Card>
               <CardHeader>
                 <CardTitle>Beschreibung</CardTitle>
               </CardHeader>
               <CardContent>
-                <p>{document.description}</p>
+                <p>{documentData.description}</p>
               </CardContent>
             </Card>
           )}
@@ -2036,20 +2145,41 @@ export default function DocumentDetail() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {previewUrl ? (
-                document.mime_type.startsWith('image/') ? (
+              {isLoadingPreview ? (
+                <div className="h-[400px] flex items-center justify-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+                </div>
+              ) : previewError ? (
+                <div className="h-[400px] flex flex-col items-center justify-center text-destructive">
+                  <XCircle className="w-8 h-8 mb-2" />
+                  <p>Fehler beim Laden der Vorschau</p>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="mt-4"
+                    onClick={() => documentData && fetchPreview(documentData.id)}
+                  >
+                    Erneut versuchen
+                  </Button>
+                </div>
+              ) : previewUrl ? (
+                documentData.mime_type.startsWith('image/') ? (
                   <img
                     src={previewUrl}
-                    alt={document.original_filename}
+                    alt={documentData.original_filename}
                     className="max-w-full h-auto rounded-lg"
                   />
-                ) : document.mime_type === 'application/pdf' ? (
+                ) : documentData.mime_type === 'application/pdf' ? (
                   <iframe
                     src={previewUrl}
                     className="w-full h-[600px] rounded-lg"
-                    title={document.original_filename}
+                    title={documentData.original_filename}
                   />
-                ) : null
+                ) : (
+                  <div className="h-[400px] flex items-center justify-center text-muted-foreground">
+                    Keine Vorschauunterstützung für diesen Dateityp
+                  </div>
+                )
               ) : (
                 <div className="h-[400px] flex items-center justify-center text-muted-foreground">
                   Keine Vorschau verfügbar
@@ -2064,341 +2194,754 @@ export default function DocumentDetail() {
 }
 ```
 
-# frontend/src/components/Dokumente/DocumentList.tsx
+# frontend/src/components/Dokumente/DocumentForm.tsx
 
 ```tsx
+// src/components/Dokumente/DocumentForm.tsx
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select';
-import {
-    FileText,
-    Upload,
-    Search,
-    Filter,
-    Tag,
-    User,
-    Calendar,
-    Download,
-    Trash2
-} from 'lucide-react';
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Plus, X, Upload, File } from 'lucide-react';
+import { DocumentService } from '@/services/DocumentService';
+import { TenantService } from '@/services/TenantService';
+import { useAsync } from '@/hooks/useAsync';
+import { useFormState } from '@/hooks/useFormState';
+import { Document, DocumentUploadData } from '@/types/document';
+import { Tenant } from '@/types/tenant';
+import { formatFileSize } from '@/lib/formatters';
 
-interface Document {
-    id: number;
-    filename: string;
-    original_filename: string;
-    category_name: string;
-    upload_date: string;
-    description?: string;
-    tenant?: {
-        id: number;
-        first_name: string;
-        last_name: string;
-    };
-    tags: string[];
-    is_confidential: boolean;
-    created_by: string;
+interface DocumentFormProps {
+  initialData?: Document;
+  tenantId?: string;
 }
 
-interface Category {
-    id: number;
-    name: string;
-}
+const ACCEPTED_FILE_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+];
 
-export default function DocumentList() {
-    const navigate = useNavigate();
-    const [documents, setDocuments] = useState<Document[]>([]);
-    const [categories, setCategories] = useState<Category[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [selectedCategory, setSelectedCategory] = useState<string>("all");
-    const [showConfidential, setShowConfidential] = useState<boolean | null>(null);
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
-    useEffect(() => {
-        loadDocuments();
-        loadCategories();
-    }, []);
+export default function DocumentForm({ initialData, tenantId }: DocumentFormProps) {
+  const navigate = useNavigate();
+  const [file, setFile] = useState<File | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  
+  const {
+    formData,
+    updateField,
+    errors,
+    setErrors,
+  } = useFormState({
+    categoryId: '',
+    tenantId: tenantId || '',
+    description: '',
+    isConfidential: false,
+    tags: [] as string[],
+    newTag: ''
+  });
 
-    const loadDocuments = async () => {
-        try {
-            console.log('Fetching documents...');
-            const response = await fetch('http://localhost:3001/documents');
-            console.log('Response status:', response.status);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const data = await response.json();
-            console.log('Received documents:', data);
-            
-            if (!Array.isArray(data)) {
-                throw new Error('Received invalid documents data');
-            }
-            
-            setDocuments(data);
-        } catch (error) {
-            console.error('Fehler beim Laden der Dokumente:', error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
+  // API calls
+  const { execute: uploadDocument, isLoading: isUploading } = useAsync(
+    async (data: DocumentUploadData) => {
+      return DocumentService.upload(data);
+    },
+    {
+      successMessage: 'Dokument wurde erfolgreich hochgeladen',
+      errorMessage: 'Fehler beim Hochladen des Dokuments'
+    }
+  );
 
-    const loadCategories = async () => {
-        try {
-          console.log('Loading categories...');
-          const response = await fetch('http://localhost:3001/documents/categories');
-          console.log('Response status:', response.status);
-          
-          if (!response.ok) {
-            console.error('Categories response not OK:', response.status);
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          
-          const data = await response.json();
-          console.log('Received categories data:', data); // Schauen was zurückkommt
-          
-          if (!Array.isArray(data) || data.length === 0) {
-            console.error('No categories received or invalid data format');
-            return;
-          }
-          
-          setCategories(data);
-        } catch (error) {
-          console.error('Error loading categories:', error);
-        }
+  const { execute: fetchCategories } = useAsync(
+    () => DocumentService.getCategories(),
+    {
+      errorMessage: 'Fehler beim Laden der Kategorien'
+    }
+  );
+
+  const { execute: fetchTenants } = useAsync(
+    () => TenantService.getAll(),
+    {
+      errorMessage: 'Fehler beim Laden der Mieter'
+    }
+  );
+
+  useEffect(() => {
+    loadCategories();
+    if (!tenantId) {
+      loadTenants();
+    }
+  }, [tenantId]);
+
+  const loadCategories = async () => {
+    try {
+      const data = await fetchCategories();
+      setCategories(data);
+    } catch (error) {
+      console.error('Fehler beim Laden der Kategorien:', error);
+    }
+  };
+
+  const loadTenants = async () => {
+    try {
+      const data = await fetchTenants();
+      setTenants(data);
+    } catch (error) {
+      console.error('Fehler beim Laden der Mieter:', error);
+    }
+  };
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true);
+    } else if (e.type === 'dragleave') {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      handleFile(e.target.files[0]);
+    }
+  };
+
+  const handleFile = (file: File) => {
+    if (!ACCEPTED_FILE_TYPES.includes(file.type)) {
+      setErrors({
+        file: 'Dateityp nicht unterstützt'
+      });
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE) {
+      setErrors({
+        file: 'Datei zu groß (max. 10MB)'
+      });
+      return;
+    }
+
+    setFile(file);
+    setErrors({});
+  };
+
+  const addTag = () => {
+    if (formData.newTag && !formData.tags.includes(formData.newTag)) {
+      updateField('tags', [...formData.tags, formData.newTag]);
+      updateField('newTag', '');
+    }
+  };
+
+  const removeTag = (tagToRemove: string) => {
+    updateField('tags', formData.tags.filter(tag => tag !== tagToRemove));
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: any = {};
+
+    if (!file) {
+      newErrors.file = 'Bitte wählen Sie eine Datei aus';
+    }
+
+    if (!formData.categoryId) {
+      newErrors.categoryId = 'Bitte wählen Sie eine Kategorie aus';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm() || !file) {
+      return;
+    }
+
+    try {
+      const uploadData: DocumentUploadData = {
+        file,
+        categoryId: parseInt(formData.categoryId),
+        description: formData.description,
+        isConfidential: formData.isConfidential,
+        tags: formData.tags
       };
 
-    const handleDownload = async (id: number, filename: string) => {
-        try {
-            const response = await fetch(`http://localhost:3001/documents/${id}/download`);
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
-        } catch (error) {
-            console.error('Fehler beim Download:', error);
-        }
-    };
+      if (formData.tenantId) {
+        uploadData.tenantId = parseInt(formData.tenantId);
+      }
 
-    const handleDelete = async (id: number) => {
-        if (!confirm('Möchten Sie dieses Dokument wirklich löschen?')) return;
+      await uploadDocument(uploadData);
+      navigate('/documents');
+    } catch (error) {
+      // Error wird bereits durch useAsync behandelt
+    }
+  };
 
-        try {
-            const response = await fetch(`http://localhost:3001/documents/${id}`, {
-                method: 'DELETE'
-            });
+  return (
+    <div className="p-4 max-w-3xl mx-auto">
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Dokument hochladen</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Drop Zone */}
+            <div
+              className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors
+                ${dragActive ? 'border-primary bg-primary/5' : 'border-gray-300'}`}
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
+            >
+              {file ? (
+                <div className="flex items-center justify-center gap-4">
+                  <File className="w-8 h-8 text-primary" />
+                  <div>
+                    <p className="font-medium">{file.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {formatFileSize(file.size)}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setFile(null)}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <Upload className="w-12 h-12 mx-auto text-muted-foreground" />
+                  <div>
+                    <p className="text-lg font-medium">
+                      Datei hierher ziehen oder klicken zum Auswählen
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Maximale Dateigröße: 10MB
+                    </p>
+                  </div>
+                  <Input
+                    type="file"
+                    className="hidden"
+                    onChange={handleFileSelect}
+                    accept={ACCEPTED_FILE_TYPES.join(',')}
+                    id="file-upload"
+                  />
+                  <Button
+                    type="button"
+                    onClick={() => document.getElementById('file-upload')?.click()}
+                  >
+                    Datei auswählen
+                  </Button>
+                </div>
+              )}
 
-            if (!response.ok) throw new Error('Löschen fehlgeschlagen');
-
-            await loadDocuments();
-        } catch (error) {
-            console.error('Fehler beim Löschen:', error);
-        }
-    };
-
-    const filteredDocuments = documents.filter(doc => {
-        const matchesSearch =
-            doc.original_filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            doc.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            doc.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
-
-        const matchesCategory = selectedCategory === "all" || 
-            doc.category_name === selectedCategory;
-
-        const matchesConfidential =
-            showConfidential === null ||
-            doc.is_confidential === showConfidential;
-
-        return matchesSearch && matchesCategory && matchesConfidential;
-    });
-
-    if (isLoading) return <div>Lade Dokumente...</div>;
-
-    return (
-        <div className="p-6 max-w-7xl mx-auto space-y-6">
-            <div className="flex justify-between items-center">
-                <h1 className="text-2xl font-bold">Dokumentenverwaltung</h1>
-                <Button
-                    onClick={() => navigate('/documents/upload')}
-                    className="flex items-center gap-2"
-                >
-                    <Upload className="w-4 h-4" />
-                    Dokument hochladen
-                </Button>
+              {errors.file && (
+                <p className="text-sm text-destructive mt-2">{errors.file}</p>
+              )}
             </div>
 
-            {/* Filter-Leiste */}
-            <Card>
-                <CardContent className="pt-6">
-                    <div className="flex gap-4 flex-wrap">
-                        <div className="flex-1 min-w-[200px]">
-                            <div className="relative">
-                                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                                <Input
-                                    placeholder="Suche nach Dokumenten..."
-                                    value={searchTerm}
-                                    onChange={e => setSearchTerm(e.target.value)}
-                                    className="pl-8"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="w-[200px]">
-                            <Select
-                                value={selectedCategory}
-                                onValueChange={setSelectedCategory}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Kategorie" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">Alle Kategorien</SelectItem>
-                                    {Array.isArray(categories) && categories.map((cat) => (
-                                        <SelectItem 
-                                            key={cat.id} 
-                                            value={cat.id.toString()}
-                                        >
-                                            {cat.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        <div className="w-[200px]">
-                            <Select
-                                value={showConfidential?.toString() ?? 'null'}
-                                onValueChange={(value) =>
-                                    setShowConfidential(
-                                        value === 'null' ? null : value === 'true'
-                                    )
-                                }
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Vertraulichkeit" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="null">Alle</SelectItem>
-                                    <SelectItem value="true">Vertraulich</SelectItem>
-                                    <SelectItem value="false">Nicht vertraulich</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* Dokumentenliste */}
+            {/* Formularfelder */}
             <div className="grid gap-4">
-                {filteredDocuments.length > 0 ? (
-                    filteredDocuments.map(doc => (
-                        <Card key={doc.id} className="hover:bg-gray-50 transition-colors">
-                            <CardHeader className="pb-2">
-                                <div className="flex justify-between">
-                                    <div className="flex items-start gap-3">
-                                        <FileText className="w-5 h-5 mt-1" />
-                                        <div>
-                                            <CardTitle className="text-lg">
-                                                {doc.original_filename}
-                                            </CardTitle>
-                                            {doc.description && (
-                                                <p className="text-sm text-muted-foreground mt-1">
-                                                    {doc.description}
-                                                </p>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-2">
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => handleDownload(doc.id, doc.original_filename)}
-                                        >
-                                            <Download className="w-4 h-4" />
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => handleDelete(doc.id)}
-                                        >
-                                            <Trash2 className="w-4 h-4" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="flex flex-wrap gap-4 text-sm">
-                                    <div className="flex items-center gap-2">
-                                        <Filter className="w-4 h-4 text-muted-foreground" />
-                                        {doc.category_name}
-                                    </div>
-
-                                    {doc.tenant && (
-                                        <div className="flex items-center gap-2">
-                                            <User className="w-4 h-4 text-muted-foreground" />
-                                            {doc.tenant.first_name} {doc.tenant.last_name}
-                                        </div>
-                                    )}
-
-                                    <div className="flex items-center gap-2">
-                                        <Calendar className="w-4 h-4 text-muted-foreground" />
-                                        {new Date(doc.upload_date).toLocaleDateString()}
-                                    </div>
-
-                                    {doc.tags.length > 0 && (
-                                        <div className="flex items-center gap-2">
-                                            <Tag className="w-4 h-4 text-muted-foreground" />
-                                            <div className="flex gap-1">
-                                                {doc.tags.map((tag, i) => (
-                                                    <span
-                                                        key={i}
-                                                        className="bg-secondary px-2 py-0.5 rounded-md text-xs"
-                                                    >
-                                                        {tag}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {doc.is_confidential && (
-                                        <span className="px-2 py-0.5 bg-red-100 text-red-800 rounded-md text-xs">
-                                            Vertraulich
-                                        </span>
-                                    )}
-                                </div>
-                            </CardContent>
-                        </Card>
-                    ))
-                ) : (
-                    <Card>
-                        <CardContent className="p-6 text-center text-muted-foreground">
-                            Keine Dokumente gefunden
-                        </CardContent>
-                    </Card>
+              {/* Kategorie */}
+              <div>
+                <label className="text-sm font-medium">Kategorie</label>
+                <Select
+                  value={formData.categoryId}
+                  onValueChange={value => updateField('categoryId', value)}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Kategorie wählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categories.map((category) => (
+                      <SelectItem 
+                        key={category.id} 
+                        value={category.id.toString()}
+                      >
+                        {category.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {errors.categoryId && (
+                  <p className="text-sm text-destructive mt-1">{errors.categoryId}</p>
                 )}
+              </div>
+
+              {/* Mieter (optional) */}
+              {!tenantId && (
+                <div>
+                  <label className="text-sm font-medium">Mieter (optional)</label>
+                  <Select
+                    value={formData.tenantId}
+                    onValueChange={value => updateField('tenantId', value)}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Mieter auswählen" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">Kein Mieter</SelectItem>
+                      {tenants.map((tenant) => (
+                        <SelectItem key={tenant.id} value={tenant.id.toString()}>
+                          {tenant.first_name} {tenant.last_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {/* Beschreibung */}
+              <div>
+                <label className="text-sm font-medium">Beschreibung</label>
+                <Input
+                  value={formData.description}
+                  onChange={e => updateField('description', e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+
+              {/* Tags */}
+              <div>
+                <label className="text-sm font-medium">Tags</label>
+                <div className="mt-2 space-y-2">
+                  <div className="flex gap-2">
+                    <Input
+                      value={formData.newTag}
+                      onChange={e => updateField('newTag', e.target.value)}
+                      placeholder="Neuen Tag eingeben"
+                    />
+                    <Button
+                      type="button"
+                      onClick={addTag}
+                      disabled={!formData.newTag}
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  
+                  {formData.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {formData.tags.map((tag, index) => (
+                        <span
+                          key={index}
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-secondary rounded-md text-sm"
+                        >
+                          {tag}
+                          <button
+                            type="button"
+                            onClick={() => removeTag(tag)}
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Vertraulichkeit */}
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="confidential"
+                  checked={formData.isConfidential}
+                  onChange={e => updateField('isConfidential', e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                <label htmlFor="confidential" className="text-sm">
+                  Als vertraulich markieren
+                </label>
+              </div>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Submit Buttons */}
+        <div className="flex justify-end gap-4">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => navigate('/documents')}
+            disabled={isUploading}
+          >
+            Abbrechen
+          </Button>
+          <Button 
+            type="submit"
+            disabled={!file || isUploading}
+          >
+            {isUploading ? 'Wird hochgeladen...' : 'Dokument hochladen'}
+          </Button>
         </div>
+      </form>
+    </div>
+  );
+}
+```
+
+# frontend/src/components/Dokumente/DocumentList.tsx
+
+```tsx
+// src/components/Dokumente/DocumentList.tsx
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  FileText,
+  Upload,
+  Search,
+  Filter,
+  Tag,
+  User,
+  Calendar,
+  Download,
+  Eye,
+  Lock,
+} from 'lucide-react';
+import { Document } from '@/types/document';
+import { useAsync } from '@/hooks/useAsync';
+import { useConfirmation } from '@/hooks/useConfirmation';
+import { DocumentService } from '@/services/DocumentService';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { formatFileSize, formatDate } from '@/lib/formatters';
+
+export default function DocumentList() {
+  const navigate = useNavigate();
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [showConfidential, setShowConfidential] = useState<boolean | null>(null);
+
+  const { execute: fetchDocuments, isLoading, error } = useAsync<Document[]>(
+    () => DocumentService.getAll(),
+    {
+      errorMessage: 'Fehler beim Laden der Dokumente'
+    }
+  );
+
+  const { execute: fetchCategories } = useAsync(
+    () => DocumentService.getCategories(),
+    {
+      errorMessage: 'Fehler beim Laden der Kategorien'
+    }
+  );
+
+  const confirmDelete = useConfirmation({
+    title: 'Dokument löschen?',
+    message: 'Möchten Sie dieses Dokument wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.',
+    confirmText: 'Löschen',
+    cancelText: 'Abbrechen'
+  });
+
+  useEffect(() => {
+    loadDocuments();
+    loadCategories();
+  }, []);
+
+  const loadDocuments = async () => {
+    try {
+      const data = await fetchDocuments();
+      setDocuments(data);
+    } catch (error) {
+      console.error('Fehler beim Laden:', error);
+    }
+  };
+
+  const loadCategories = async () => {
+    try {
+      const data = await fetchCategories();
+      setCategories(data);
+    } catch (error) {
+      console.error('Fehler beim Laden der Kategorien:', error);
+    }
+  };
+
+  const handleDownload = async (id: number, filename: string) => {
+    try {
+      const response = await fetch(`http://localhost:3001/documents/${id}/download`);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Fehler beim Download:', error);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    const confirmed = await confirmDelete.confirm();
+    if (!confirmed) return;
+
+    try {
+      await DocumentService.delete(id);
+      await loadDocuments();
+    } catch (error) {
+      console.error('Fehler beim Löschen:', error);
+    }
+  };
+
+  const filteredDocuments = documents.filter(doc => {
+    const matchesSearch = 
+      doc.original_filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      doc.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      doc.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
+
+    const matchesCategory = selectedCategory === 'all' || 
+      doc.category_id.toString() === selectedCategory;
+
+    const matchesConfidential = 
+      showConfidential === null || 
+      doc.is_confidential === showConfidential;
+
+    return matchesSearch && matchesCategory && matchesConfidential;
+  });
+
+  if (isLoading) {
+    return <LoadingState />;
+  }
+
+  if (error) {
+    return (
+      <ErrorState
+        title="Fehler beim Laden"
+        message={error.message}
+        onRetry={loadDocuments}
+      />
     );
+  }
+
+  return (
+    <div className="p-4 max-w-5xl mx-auto">
+      <div className="flex justify-between items-center mb-6">
+        <div className="flex items-center gap-2">
+          <FileText className="w-6 h-6" />
+          <h1 className="text-2xl font-bold">Dokumente</h1>
+        </div>
+        <Button
+          onClick={() => navigate('/documents/upload')}
+          className="flex items-center gap-2"
+        >
+          <Upload className="w-4 h-4" />
+          Dokument hochladen
+        </Button>
+      </div>
+
+      {/* Filter-Leiste */}
+      <Card className="mb-6">
+        <CardContent className="pt-6">
+          <div className="flex gap-4 flex-wrap">
+            <div className="flex-1 min-w-[200px]">
+              <div className="relative">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Suche nach Dokumenten..."
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  className="pl-8"
+                />
+              </div>
+            </div>
+
+            <div className="w-[200px]">
+              <Select
+                value={selectedCategory}
+                onValueChange={setSelectedCategory}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Kategorie" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Alle Kategorien</SelectItem>
+                  {categories.map((cat) => (
+                    <SelectItem 
+                      key={cat.id} 
+                      value={cat.id.toString()}
+                    >
+                      {cat.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="w-[200px]">
+              <Select
+                value={showConfidential?.toString() ?? 'null'}
+                onValueChange={(value) =>
+                  setShowConfidential(
+                    value === 'null' ? null : value === 'true'
+                  )
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Vertraulichkeit" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="null">Alle</SelectItem>
+                  <SelectItem value="true">Vertraulich</SelectItem>
+                  <SelectItem value="false">Nicht vertraulich</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Dokumentenliste */}
+      {documents.length === 0 ? (
+        <EmptyState
+          title="Keine Dokumente vorhanden"
+          description="Laden Sie Ihr erstes Dokument hoch"
+          icon={<FileText className="w-12 h-12 text-muted-foreground" />}
+          action={{
+            label: 'Dokument hochladen',
+            onClick: () => navigate('/documents/upload')
+          }}
+        />
+      ) : filteredDocuments.length === 0 ? (
+        <Card>
+          <CardContent className="p-6 text-center">
+            <p className="text-muted-foreground">
+              Keine Dokumente gefunden für die ausgewählten Filter
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4">
+          {filteredDocuments.map(doc => (
+            <Card 
+              key={doc.id}
+              className="hover:shadow-md transition-all duration-200"
+            >
+              <CardContent className="p-4">
+                <div className="flex justify-between items-start">
+                  <div className="flex gap-3">
+                    <FileText className="w-8 h-8 text-primary mt-1" />
+                    <div>
+                      <h3 className="font-medium">{doc.original_filename}</h3>
+                      {doc.description && (
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {doc.description}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    {doc.is_confidential && (
+                      <Lock className="w-4 h-4 text-red-500" />
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate(`/documents/${doc.id}`)}
+                      className="flex items-center gap-1"
+                    >
+                      <Eye className="w-4 h-4" />
+                      <span className="hidden sm:inline">Anzeigen</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDownload(doc.id, doc.original_filename)}
+                      className="flex items-center gap-1"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span className="hidden sm:inline">Download</span>
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-4 text-sm">
+                  <div className="flex items-center gap-2">
+                    <Filter className="w-4 h-4 text-muted-foreground" />
+                    {doc.category_name}
+                  </div>
+
+                  {doc.tenant && (
+                    <div className="flex items-center gap-2">
+                      <User className="w-4 h-4 text-muted-foreground" />
+                      {doc.tenant.first_name} {doc.tenant.last_name}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-muted-foreground" />
+                    {formatDate(doc.upload_date)}
+                  </div>
+
+                  {doc.tags.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <Tag className="w-4 h-4 text-muted-foreground" />
+                      <div className="flex gap-1">
+                        {doc.tags.map((tag, i) => (
+                          <span
+                            key={i}
+                            className="bg-secondary px-2 py-0.5 rounded-md text-xs"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 ```
 
@@ -2804,176 +3347,607 @@ export default function DocumentUpload({ tenantId }: DocumentUploadProps) {
 # frontend/src/components/Immobilien/EditPropertyWrapper.tsx
 
 ```tsx
-// src/components/EditPropertyWrapper.tsx
-import { useState, useEffect } from 'react';
+// src/components/Immobilien/EditPropertyWrapper.tsx
 import { useParams } from 'react-router-dom';
 import PropertyForm from './PropertyForm';
+import { useEffect, useState } from 'react';
+import { Property } from '@/types/property';
+import { PropertyService } from '@/services/PropertyService';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
 
 export default function EditPropertyWrapper() {
-  const { id } = useParams();
-  const [property, setProperty] = useState(null);
+  const { id } = useParams<{ id: string }>();
+  const [property, setProperty] = useState<Property | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  
+  const [error, setError] = useState<Error | null>(null);
+
   useEffect(() => {
-    const loadProperty = async () => {
+    async function loadProperty() {
       try {
-        const response = await fetch(`http://localhost:3001/properties/${id}`);
-        if (!response.ok) throw new Error('Laden fehlgeschlagen');
-        const data = await response.json();
+        setIsLoading(true);
+        const data = await PropertyService.getById(Number(id));
         setProperty(data);
-      } catch (error) {
-        console.error('Fehler beim Laden:', error);
+      } catch (err) {
+        setError(err instanceof Error ? err : new Error('Error loading property'));
       } finally {
         setIsLoading(false);
       }
-    };
+    }
 
-    loadProperty();
+    if (id) {
+      loadProperty();
+    }
   }, [id]);
 
-  if (isLoading) return <div>Lade...</div>;
-  if (!property) return <div>Immobilie nicht gefunden</div>;
-  
+  if (isLoading) return <LoadingState />;
+  if (error || !property) return <ErrorState title="Error" message={error?.message || 'Property not found'} />;
+
   return <PropertyForm initialData={property} />;
+}
+```
+
+# frontend/src/components/Immobilien/PropertyCard.tsx
+
+```tsx
+// src/components/Immobilien/PropertyCard.tsx
+import { Property } from '@/types/property';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { ChevronDown, ChevronUp, Pencil, Trash2 } from 'lucide-react';
+import { formatCurrency } from '@/lib/formatters';
+
+interface PropertyCardProps {
+  property: Property;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}
+
+export function PropertyCard({
+  property,
+  isExpanded,
+  onToggleExpand,
+  onEdit,
+  onDelete,
+}: PropertyCardProps) {
+  return (
+    <Card className="hover:shadow-md transition-shadow duration-200">
+      <CardHeader className="p-4">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onToggleExpand}
+              className="p-0 hover:bg-transparent"
+            >
+              {isExpanded ? (
+                <ChevronUp className="w-4 h-4" />
+              ) : (
+                <ChevronDown className="w-4 h-4" />
+              )}
+            </Button>
+            <h3 className="font-semibold text-lg">{property.address}</h3>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onEdit}
+              className="flex items-center gap-1"
+            >
+              <Pencil className="w-4 h-4" />
+              <span className="hidden sm:inline">Bearbeiten</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onDelete}
+              className="flex items-center gap-1 text-destructive hover:text-destructive"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span className="hidden sm:inline">Löschen</span>
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="px-4 pb-4">
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-sm text-muted-foreground">Art der Immobilie</p>
+              <p>{property.property_type || 'Keine Angabe'}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Monatliche Gesamtmiete</p>
+              <p className="font-medium">
+                {formatCurrency(property.total_rent)}
+              </p>
+            </div>
+          </div>
+
+          {isExpanded && property.units && (
+            <div className="pt-4 border-t">
+              <h4 className="font-medium mb-3">Wohneinheiten</h4>
+              <div className="grid gap-3">
+                {property.units.map((unit, index) => (
+                  <div
+                    key={unit.id || index}
+                    className="bg-secondary/50 rounded-lg p-3"
+                  >
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Name</p>
+                        <p className="text-sm font-medium">{unit.name}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Typ</p>
+                        <p className="text-sm">{unit.type}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Größe</p>
+                        <p className="text-sm">{unit.size} m²</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Status</p>
+                        <div className="flex items-center gap-1">
+                          <span className={`w-2 h-2 rounded-full ${
+                            unit.status === 'besetzt' ? 'bg-blue-500' : 'bg-green-500'
+                          }`} />
+                          <p className="text-sm">{unit.status}</p>
+                        </div>
+                      </div>
+                      {unit.status === 'besetzt' && (
+                        <div>
+                          <p className="text-xs text-muted-foreground">Miete</p>
+                          <p className="text-sm">{formatCurrency(unit.rent || 0)}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+```
+
+# frontend/src/components/Immobilien/PropertyDetail.tsx
+
+```tsx
+// src/components/Immobilien/PropertyDetail.tsx
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Property } from '@/types/property';
+import { useAsync } from '@/hooks/useAsync';
+import { PropertyService } from '@/services/PropertyService';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { formatCurrency, formatDate } from '@/lib/formatters';
+import { Building2, ArrowLeft, MapPin, Home, Euro, Users } from 'lucide-react';
+
+export default function PropertyDetail() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [property, setProperty] = useState<Property | null>(null);
+
+  const { execute: fetchProperty, isLoading, error } = useAsync(
+    () => PropertyService.getById(Number(id)),
+    {
+      errorMessage: 'Fehler beim Laden der Immobilie'
+    }
+  );
+
+  useEffect(() => {
+    if (id) {
+      loadProperty();
+    }
+  }, [id]);
+
+  const loadProperty = async () => {
+    try {
+      const data = await fetchProperty();
+      setProperty(data);
+    } catch (error) {
+      console.error('Fehler beim Laden:', error);
+    }
+  };
+
+  if (isLoading) {
+    return <LoadingState />;
+  }
+
+  if (error || !property) {
+    return (
+      <ErrorState
+        title="Fehler beim Laden"
+        message={error?.message || 'Immobilie nicht gefunden'}
+        onRetry={loadProperty}
+      />
+    );
+  }
+
+  return (
+    <div className="p-4 max-w-5xl mx-auto">
+      {/* Header */}
+      <div className="mb-6">
+        <Button
+          variant="ghost"
+          onClick={() => navigate('/properties')}
+          className="mb-4"
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Zurück zur Übersicht
+        </Button>
+        
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <Building2 className="w-6 h-6" />
+              {property.address}
+            </h1>
+            <p className="text-muted-foreground mt-1">
+              {property.property_type}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => navigate(`/properties/${property.id}/documents`)}
+            >
+              Dokumente
+            </Button>
+            <Button
+              onClick={() => navigate(`/properties/edit/${property.id}`)}
+            >
+              Bearbeiten
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Übersichtskarten */}
+      <div className="grid gap-6">
+        {/* Allgemeine Informationen */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Übersicht</CardTitle>
+          </CardHeader>
+          <CardContent className="grid sm:grid-cols-3 gap-6">
+            <div className="flex items-start gap-3">
+              <MapPin className="w-5 h-5 text-muted-foreground shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium">Adresse</p>
+                <p className="text-muted-foreground">{property.address}</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <Home className="w-5 h-5 text-muted-foreground shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium">Wohneinheiten</p>
+                <p className="text-muted-foreground">
+                  {property.units.length} Einheiten
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <Euro className="w-5 h-5 text-muted-foreground shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium">Gesamtmiete</p>
+                <p className="text-muted-foreground">
+                  {formatCurrency(property.total_rent)} / Monat
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Wohneinheiten */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Wohneinheiten</CardTitle>
+            <Button
+              variant="outline"
+              onClick={() => navigate(`/properties/edit/${property.id}#units`)}
+            >
+              Einheiten verwalten
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4">
+              {property.units.map((unit) => (
+                <div
+                  key={unit.id}
+                  className="p-4 rounded-lg border bg-card hover:shadow-sm transition-shadow"
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-medium">{unit.name}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        {unit.type} • {unit.size} m²
+                      </p>
+                    </div>
+                    <div className={`px-2 py-1 rounded-full text-sm ${
+                      unit.status === 'besetzt'
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-green-100 text-green-700'
+                    }`}>
+                      {unit.status}
+                    </div>
+                  </div>
+                  
+                  {unit.status === 'besetzt' && (
+                    <div className="mt-4 pt-4 border-t">
+                      <div className="flex items-center gap-2 text-sm">
+                        <Users className="w-4 h-4 text-muted-foreground" />
+                        <span>Vermietet für {formatCurrency(unit.rent || 0)} / Monat</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Statistiken */}
+        <div className="grid sm:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Vermietungsstatus</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <span className="text-sm">Vermietungsquote</span>
+                    <span className="text-sm font-medium">
+                      {Math.round((property.units.filter(u => u.status === 'besetzt').length / property.units.length) * 100)}%
+                    </span>
+                  </div>
+                  <div className="h-2 bg-secondary rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-primary"
+                      style={{ 
+                        width: `${(property.units.filter(u => u.status === 'besetzt').length / property.units.length) * 100}%`
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4 pt-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Vermietet</p>
+                    <p className="text-2xl font-bold">
+                      {property.units.filter(u => u.status === 'besetzt').length}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Verfügbar</p>
+                    <p className="text-2xl font-bold">
+                      {property.units.filter(u => u.status === 'verfügbar').length}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Mieteinnahmen</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Aktuelle Monatsmiete</p>
+                  <p className="text-2xl font-bold">{formatCurrency(property.total_rent)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Durchschnittliche Miete pro m²</p>
+                  <p className="text-2xl font-bold">
+                    {formatCurrency(
+                      property.total_rent / 
+                      property.units.reduce((sum, unit) => sum + unit.size, 0)
+                    )}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
 }
 ```
 
 # frontend/src/components/Immobilien/PropertyForm.tsx
 
 ```tsx
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Plus, Trash } from 'lucide-react'
+// src/components/Immobilien/PropertyForm.tsx
+import { useNavigate } from 'react-router-dom';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { propertyTypes, UNIT_TYPES, UNIT_STATUS } from '@/constants/propertyTypes'
-
-// Typdefinitionen
-interface Unit {
-  id?: number
-  name: string
-  type: typeof UNIT_TYPES[number]
-  size: number | ''
-  status: typeof UNIT_STATUS[number]
-  rent?: number | ''
-}
-
-interface Property {
-  id?: number
-  address: string
-  size: number
-  price: number
-  property_type: string
-  units: Unit[]
-}
+} from "@/components/ui/select";
+import { Plus, X } from 'lucide-react';
+import { PropertyService } from '@/services/PropertyService';
+import { useAsync } from '@/hooks/useAsync';
+import { useFormState } from '@/hooks/useFormState';
+import { useConfirmation } from '@/hooks/useConfirmation';
+import { Property, PropertyFormData, Unit } from '@/types/property';
+import { required, number } from '@/lib/validators';
+import { propertyTypes, UNIT_TYPES, UNIT_STATUS } from '@/constants/propertyTypes';
 
 interface PropertyFormProps {
-  initialData?: Property
+  initialData?: Property;
 }
 
+const INITIAL_PROPERTY_DATA: PropertyFormData = {
+  address: '',
+  property_type: '',
+  units: []
+};
+
+const INITIAL_UNIT: Omit<Unit, 'id' | 'property_id' | 'created_at' | 'updated_at'> = {
+  name: '',
+  type: 'Wohnung',
+  size: 0,
+  status: 'verfügbar',
+  rent: 0
+};
+
 export default function PropertyForm({ initialData }: PropertyFormProps) {
-  console.log('PropertyForm received initialData:', initialData); // Logging
-  const navigate = useNavigate()
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const navigate = useNavigate();
+  
+  const {
+    formData,
+    updateField,
+    errors,
+    setErrors,
+  } = useFormState<PropertyFormData>(
+    initialData || INITIAL_PROPERTY_DATA
+  );
 
-  // Formular-State mit initialData oder Defaultwerten
-  const [property, setProperty] = useState<Property>(() => ({
-    address: initialData?.address || '',
-    size: initialData?.size || 0,
-    price: initialData?.price || 0,
-    property_type: initialData?.property_type || '',
-    units: initialData?.units || []
-  }))
-
-  // Unit Management Funktionen
-  const addUnit = () => {
-    const newUnit: Unit = {
-      name: '',
-      type: 'Wohnung',
-      size: '',
-      status: 'verfügbar',
-      rent: ''
+  const { execute: saveProperty, isLoading: isSaving } = useAsync(
+    async (data: PropertyFormData) => {
+      if (initialData) {
+        return PropertyService.update(initialData.id, data);
+      }
+      return PropertyService.create(data);
+    },
+    {
+      successMessage: initialData 
+        ? 'Immobilie wurde erfolgreich aktualisiert'
+        : 'Immobilie wurde erfolgreich erstellt',
+      errorMessage: 'Fehler beim Speichern der Immobilie'
     }
-    setProperty(prev => ({
-      ...prev,
-      units: [...prev.units, newUnit]
-    }))
-  }
+  );
 
-  const removeUnit = (index: number) => {
-    setProperty(prev => ({
-      ...prev,
-      units: prev.units.filter((_, i) => i !== index)
-    }))
-  }
+  const confirmDiscardDialog = useConfirmation({
+    title: 'Änderungen verwerfen?',
+    message: 'Möchten Sie die Bearbeitung wirklich abbrechen? Alle nicht gespeicherten Änderungen gehen verloren.',
+    confirmText: 'Verwerfen',
+    cancelText: 'Weiter bearbeiten'
+  });
 
-  const updateUnit = (index: number, field: keyof Unit, value: any) => {
-    setProperty(prev => ({
-      ...prev,
-      units: prev.units.map((unit, i) => {
-        if (i !== index) return unit;
+  const validateForm = (): boolean => {
+    let isValid = true;
+    const newErrors: Partial<Record<keyof PropertyFormData, string>> = {};
 
-        // Wenn der Status von "besetzt" auf "verfügbar" wechselt, Miete zurücksetzen
-        if (field === 'status' && value === 'verfügbar') {
-          return { ...unit, [field]: value, rent: '' };
-        }
+    if (!formData.address) {
+      newErrors.address = 'Adresse ist erforderlich';
+      isValid = false;
+    }
 
-        // Für numerische Felder
-        if (field === 'size' || field === 'rent') {
-          value = value === '' ? '' : Number(value);
-        }
+    if (!formData.property_type) {
+      newErrors.property_type = 'Immobilientyp ist erforderlich';
+      isValid = false;
+    }
 
-        return { ...unit, [field]: value };
-      })
-    }))
-  }
+    // Validiere alle Units
+    const unitErrors: any[] = [];
+    formData.units.forEach((unit, index) => {
+      const unitError: any = {};
+      
+      if (!unit.name) {
+        unitError.name = 'Name ist erforderlich';
+        isValid = false;
+      }
+      
+      if (unit.size <= 0) {
+        unitError.size = 'Größe muss größer als 0 sein';
+        isValid = false;
+      }
 
-  // Form Submit Handler
+      if (unit.status === 'besetzt' && (!unit.rent || unit.rent <= 0)) {
+        unitError.rent = 'Miete ist erforderlich für besetzte Einheiten';
+        isValid = false;
+      }
+
+      if (Object.keys(unitError).length > 0) {
+        unitErrors[index] = unitError;
+      }
+    });
+
+    if (unitErrors.length > 0) {
+      newErrors.units = unitErrors;
+    }
+
+    setErrors(newErrors);
+    return isValid;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsSubmitting(true)
-
-    // Konvertiere leere Strings zu 0
-    const submissionData = {
-      ...property,
-      units: property.units.map(unit => ({
-        ...unit,
-        size: unit.size === '' ? 0 : Number(unit.size),
-        rent: unit.rent === '' ? 0 : Number(unit.rent)
-      }))
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
     }
 
     try {
-      const url = initialData
-        ? `http://localhost:3001/properties/${initialData.id}`
-        : 'http://localhost:3001/properties'
-
-      const response = await fetch(url, {
-        method: initialData ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(submissionData)
-      })
-
-      if (!response.ok) throw new Error('Fehler beim Speichern')
-      navigate('/properties')
+      await saveProperty(formData);
+      navigate('/properties');
     } catch (error) {
-      console.error('Fehler beim Speichern:', error)
-      alert('Fehler beim Speichern der Immobilie')
-    } finally {
-      setIsSubmitting(false)
+      // Error wird bereits durch useAsync behandelt
     }
-  }
+  };
+
+  const handleCancel = async () => {
+    const hasChanges = JSON.stringify(initialData) !== JSON.stringify(formData);
+    if (hasChanges) {
+      const confirmed = await confirmDiscardDialog.confirm();
+      if (!confirmed) return;
+    }
+    navigate('/properties');
+  };
+
+  const addUnit = () => {
+    updateField('units', [...formData.units, { ...INITIAL_UNIT }]);
+  };
+
+  const removeUnit = (index: number) => {
+    const newUnits = formData.units.filter((_, i) => i !== index);
+    updateField('units', newUnits);
+  };
+
+  const updateUnit = (index: number, field: keyof Unit, value: any) => {
+    const newUnits = formData.units.map((unit, i) => {
+      if (i !== index) return unit;
+
+      // Wenn der Status von "besetzt" auf "verfügbar" wechselt, Miete zurücksetzen
+      if (field === 'status' && value === 'verfügbar') {
+        return { ...unit, [field]: value, rent: 0 };
+      }
+
+      // Für numerische Felder
+      if (field === 'size' || field === 'rent') {
+        value = value === '' ? 0 : Number(value);
+      }
+
+      return { ...unit, [field]: value };
+    });
+
+    updateField('units', newUnits);
+  };
 
   return (
-    <div className="p-4 max-w-4xl mx-auto">
+    <div className="p-4 max-w-3xl mx-auto">
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Immobilien-Hauptdaten */}
         <Card>
@@ -2983,25 +3957,28 @@ export default function PropertyForm({ initialData }: PropertyFormProps) {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4">
               {/* Adresse */}
               <div>
                 <label className="text-sm font-medium">Adresse</label>
                 <Input
-                  required
-                  value={property.address}
-                  onChange={e => setProperty({ ...property, address: e.target.value })}
+                  value={formData.address}
+                  onChange={e => updateField('address', e.target.value)}
                   className="mt-1"
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                 />
+                {errors.address && (
+                  <p className="text-sm text-destructive mt-1">{errors.address}</p>
+                )}
               </div>
 
               {/* Immobilientyp */}
               <div>
                 <label className="text-sm font-medium">Art der Immobilie</label>
                 <Select
-                  value={property.property_type}
-                  onValueChange={(value) => setProperty({ ...property, property_type: value })}
+                  value={formData.property_type}
+                  onValueChange={value => updateField('property_type', value)}
+                  disabled={isSaving}
                 >
                   <SelectTrigger className="mt-1">
                     <SelectValue placeholder="Bitte wählen..." />
@@ -3014,6 +3991,9 @@ export default function PropertyForm({ initialData }: PropertyFormProps) {
                     ))}
                   </SelectContent>
                 </Select>
+                {errors.property_type && (
+                  <p className="text-sm text-destructive mt-1">{errors.property_type}</p>
+                )}
               </div>
             </div>
           </CardContent>
@@ -3027,7 +4007,7 @@ export default function PropertyForm({ initialData }: PropertyFormProps) {
               type="button"
               onClick={addUnit}
               className="flex items-center gap-2"
-              disabled={isSubmitting}
+              disabled={isSaving}
             >
               <Plus className="w-4 h-4" />
               Einheit hinzufügen
@@ -3035,364 +4015,584 @@ export default function PropertyForm({ initialData }: PropertyFormProps) {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {property.units.map((unit, index) => (
-                <Card key={index}>
-                  <CardContent className="pt-4">
-                    <div className="flex justify-between items-center mb-4">
-                      <h3 className="text-lg font-semibold">Einheit {index + 1}</h3>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => removeUnit(index)}
-                        disabled={isSubmitting}
-                      >
-                        <Trash className="w-4 h-4" />
-                      </Button>
-                    </div>
+              {formData.units.map((unit, index) => (
+                <div 
+                  key={index}
+                  className="p-4 bg-secondary/50 rounded-lg space-y-4"
+                >
+                  <div className="flex justify-between items-start">
+                    <h3 className="text-sm font-medium">Einheit {index + 1}</h3>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => removeUnit(index)}
+                      disabled={isSaving}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                      {/* Name */}
-                      <div>
-                        <label className="text-sm font-medium">Name</label>
-                        <Input
-                          value={unit.name}
-                          onChange={e => updateUnit(index, 'name', e.target.value)}
-                          placeholder="z.B. Wohnung 1"
-                          className="mt-1"
-                          disabled={isSubmitting}
-                        />
-                      </div>
-
-                      {/* Typ */}
-                      <div>
-                        <label className="text-sm font-medium">Typ</label>
-                        <Select
-                          value={unit.type}
-                          onValueChange={(value) => updateUnit(index, 'type', value)}
-                        >
-                          <SelectTrigger className="mt-1">
-                            <SelectValue placeholder="Bitte wählen..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {UNIT_TYPES.map((type) => (
-                              <SelectItem key={type} value={type}>
-                                {type}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {/* Größe */}
-                      <div>
-                        <label className="text-sm font-medium">Größe (m²)</label>
-                        <Input
-                          type="number"
-                          value={unit.size === '' ? '' : unit.size}
-                          onChange={e => updateUnit(index, 'size', e.target.value || '')}
-                          className="mt-1"
-                          disabled={isSubmitting}
-                        />
-                      </div>
-
-                      {/* Status */}
-                      <div>
-                        <label className="text-sm font-medium">Status</label>
-                        <Select
-                          value={unit.status}
-                          onValueChange={(value) => updateUnit(index, 'status', value)}
-                        >
-                          <SelectTrigger className="mt-1">
-                            <SelectValue placeholder="Bitte wählen..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {UNIT_STATUS.map((status) => (
-                              <SelectItem key={status} value={status}>
-                                {status}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {/* Miete - nur anzeigen wenn Status "besetzt" ist */}
-                      {unit.status === 'besetzt' && (
-                        <div>
-                          <label className="text-sm font-medium">Monatliche Miete (€)</label>
-                          <Input
-                            type="number"
-                            value={unit.rent === '' ? '' : unit.rent}
-                            onChange={e => updateUnit(index, 'rent', e.target.value || '')}
-                            className="mt-1"
-                            disabled={isSubmitting}
-                          />
-                        </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    {/* Name */}
+                    <div>
+                      <label className="text-sm font-medium">Name</label>
+                      <Input
+                        value={unit.name}
+                        onChange={e => updateUnit(index, 'name', e.target.value)}
+                        placeholder="z.B. Wohnung 1"
+                        className="mt-1"
+                        disabled={isSaving}
+                      />
+                      {errors.units?.[index]?.name && (
+                        <p className="text-sm text-destructive mt-1">
+                          {errors.units[index].name}
+                        </p>
                       )}
                     </div>
-                  </CardContent>
-                </Card>
+
+                    {/* Typ */}
+                    <div>
+                      <label className="text-sm font-medium">Typ</label>
+                      <Select
+                        value={unit.type}
+                        onValueChange={value => updateUnit(index, 'type', value)}
+                        disabled={isSaving}
+                      >
+                        <SelectTrigger className="mt-1">
+                          <SelectValue placeholder="Bitte wählen..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {UNIT_TYPES.map((type) => (
+                            <SelectItem key={type} value={type}>
+                              {type}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Größe */}
+                    <div>
+                      <label className="text-sm font-medium">Größe (m²)</label>
+                      <Input
+                        type="number"
+                        value={unit.size || ''}
+                        onChange={e => updateUnit(index, 'size', e.target.value)}
+                        className="mt-1"
+                        min="0"
+                        disabled={isSaving}
+                      />
+                      {errors.units?.[index]?.size && (
+                        <p className="text-sm text-destructive mt-1">
+                          {errors.units[index].size}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Status */}
+                    <div>
+                      <label className="text-sm font-medium">Status</label>
+                      <Select
+                        value={unit.status}
+                        onValueChange={value => updateUnit(index, 'status', value)}
+                        disabled={isSaving}
+                      >
+                        <SelectTrigger className="mt-1">
+                          <SelectValue placeholder="Bitte wählen..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {UNIT_STATUS.map((status) => (
+                            <SelectItem key={status} value={status}>
+                              {status}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Miete - nur anzeigen wenn Status "besetzt" ist */}
+                    {unit.status === 'besetzt' && (
+                      <div>
+                        <label className="text-sm font-medium">Monatliche Miete (€)</label>
+                        <Input
+                          type="number"
+                          value={unit.rent || ''}
+                          onChange={e => updateUnit(index, 'rent', e.target.value)}
+                          className="mt-1"
+                          min="0"
+                          disabled={isSaving}
+                        />
+                        {errors.units?.[index]?.rent && (
+                          <p className="text-sm text-destructive mt-1">
+                            {errors.units[index].rent}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
           </CardContent>
         </Card>
 
-        {/* Formular-Buttons */}
-        <div className="flex gap-4">
+        {/* Form Buttons */}
+        <div className="flex justify-end gap-4">
           <Button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSaving}
           >
-            {isSubmitting ? 'Wird gespeichert...' : 'Speichern'}
+            {isSaving ? 'Wird gespeichert...' : 'Speichern'}
           </Button>
           <Button
             type="button"
             variant="outline"
-            onClick={() => navigate('/properties')}
-            disabled={isSubmitting}
+            onClick={handleCancel}
+            disabled={isSaving}
           >
             Abbrechen
           </Button>
         </div>
       </form>
     </div>
-  )
+  );
 }
-
-
 ```
 
 # frontend/src/components/Immobilien/PropertyList.tsx
 
 ```tsx
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { PlusCircle, Pencil, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
-import { Property, Unit } from '@/types/property'
+// src/components/Immobilien/PropertyList.tsx
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Building2, PlusCircle } from 'lucide-react';
+import { Property } from '@/types/property';
+import { useAsync } from '@/hooks/useAsync';
+import { useConfirmation } from '@/hooks/useConfirmation';
+import { PropertyService } from '@/services/PropertyService';
+import { PropertyCard } from './PropertyCard';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
 
 export default function PropertyList() {
-  const [properties, setProperties] = useState<Property[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [isDeleting, setIsDeleting] = useState<number | null>(null)
-  const [expandedProperty, setExpandedProperty] = useState<number | null>(null)
-  const navigate = useNavigate()
+  const navigate = useNavigate();
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [expandedProperty, setExpandedProperty] = useState<number | null>(null);
+
+  const { execute: fetchProperties, isLoading, error } = useAsync<Property[]>(
+    () => PropertyService.getAll(),
+    {
+      errorMessage: 'Fehler beim Laden der Immobilien'
+    }
+  );
+
+  const { confirm: confirmDelete } = useConfirmation({
+    title: 'Immobilie löschen',
+    message: 'Möchten Sie diese Immobilie wirklich löschen? Alle zugehörigen Daten werden ebenfalls gelöscht.',
+    confirmText: 'Löschen',
+    cancelText: 'Abbrechen'
+  });
+
+  useEffect(() => {
+    loadProperties();
+  }, []);
 
   const loadProperties = async () => {
     try {
-      const response = await fetch('http://localhost:3001/properties')
-      if (!response.ok) {
-        throw new Error(await response.text())
-      }
-      const data = await response.json()
-      setProperties(data)
+      const data = await fetchProperties();
+      setProperties(data);
     } catch (error) {
-      console.error('Fehler beim Laden:', error)
-      alert('Fehler beim Laden der Immobilien')
-    } finally {
-      setIsLoading(false)
+      console.error('Fehler beim Laden:', error);
     }
-  }
+  };
 
-  useEffect(() => {
-    loadProperties()
-  }, [])
+  const handleDelete = async (id: number) => {
+    const confirmed = await confirmDelete();
+    if (!confirmed) return;
 
-  const toggleExpand = (propertyId: number | undefined) => {
-    if (!propertyId) return;
-    setExpandedProperty(expandedProperty === propertyId ? null : propertyId);
-  }
-
-  const handleDelete = async (id: number | undefined) => {
-    if (!id) return;
-    if (!confirm('Möchten Sie diese Immobilie wirklich löschen?')) return;
-
-    setIsDeleting(id);
     try {
-      const response = await fetch(`http://localhost:3001/properties/${id}`, {
-        method: 'DELETE'
-      });
-
-      if (!response.ok) {
-        throw new Error(await response.text())
-      }
-
-      await loadProperties()
+      await PropertyService.delete(id);
+      await loadProperties();
     } catch (error) {
-      console.error('Fehler beim Löschen:', error)
-      alert('Fehler beim Löschen der Immobilie')
-    } finally {
-      setIsDeleting(null)
+      console.error('Fehler beim Löschen:', error);
     }
+  };
+
+  if (isLoading) {
+    return <LoadingState />;
   }
 
-  if (isLoading) return <div>Lade Immobilien...</div>
+  if (error) {
+    return (
+      <ErrorState
+        title="Fehler beim Laden"
+        message={error.message}
+        onRetry={loadProperties}
+      />
+    );
+  }
 
   return (
-    <div className="p-4 max-w-4xl mx-auto">
+    <div className="p-4 max-w-5xl mx-auto">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Immobilienverwaltung</h1>
-        {properties.length > 0 && (
-          <Button
-            className="flex items-center gap-2"
-            onClick={() => navigate('/new')}
-          >
-            <PlusCircle className="w-4 h-4" />
-            Neue Immobilie
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          <Building2 className="w-6 h-6" />
+          <h1 className="text-2xl font-bold">Immobilien</h1>
+        </div>
+        <Button
+          onClick={() => navigate('/properties/new')}
+          className="flex items-center gap-2"
+        >
+          <PlusCircle className="w-4 h-4" />
+          Neue Immobilie
+        </Button>
       </div>
 
       {properties.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <p className="text-muted-foreground mb-4">Keine Immobilien vorhanden, Pul darbiar Azizam!</p>
-            <Button
-              onClick={() => navigate('/new')}
-              className="flex items-center gap-2"
-            >
-              <PlusCircle className="w-4 h-4" />
-              Erste Immobilie hinzufügen
-            </Button>
-          </CardContent>
-        </Card>
+        <EmptyState
+          title="Keine Immobilien vorhanden"
+          description="Fügen Sie Ihre erste Immobilie hinzu"
+          icon={<Building2 className="w-12 h-12 text-muted-foreground" />}
+          action={{
+            label: 'Erste Immobilie hinzufügen',
+            onClick: () => navigate('/properties/new')
+          }}
+        />
       ) : (
         <div className="grid gap-4">
           {properties.map(property => (
-            <Card key={property.id}>
-              <CardHeader>
-                <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => toggleExpand(property.id)}
-                      className="p-0 hover:bg-transparent"
-                    >
-                      {expandedProperty === property.id ?
-                        <ChevronUp className="w-4 h-4" /> :
-                        <ChevronDown className="w-4 h-4" />
-                      }
-                    </Button>
-                    <CardTitle>{property.address}</CardTitle>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => navigate(`/properties/edit/${property.id}`)} // Korrigierter Pfad
-                      disabled={isDeleting === property.id}
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleDelete(property.id)}
-                      disabled={isDeleting === property.id}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500">Art der Immobilie</p>
-                      <p>{property.property_type || 'Keine Angabe'}</p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-gray-500">Monatliche Gesamtmiete</p>
-                      <p className="font-medium">
-                        {property.total_rent?.toLocaleString('de-DE')} €
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Units Section */}
-                  {expandedProperty === property.id && property.units && property.units.length > 0 && (
-                    <div className="mt-4 border-t pt-4">
-                      <h3 className="text-sm font-semibold mb-3">Einheiten:</h3>
-                      <div className="grid gap-3">
-                        {property.units.map((unit, index) => (
-                          <div key={index} className="bg-gray-50 p-3 rounded-lg">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                              <div>
-                                <p className="text-xs text-gray-500">Name</p>
-                                <p className="text-sm font-medium">{unit.name}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-500">Typ</p>
-                                <p className="text-sm">{unit.type}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-500">Größe</p>
-                                <p className="text-sm">{unit.size} m²</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-500">Status</p>
-                                <p className="text-sm">{unit.status}</p>
-                              </div>
-                              {unit.status === 'besetzt' && (
-                                <div>
-                                  <p className="text-xs text-gray-500">Miete</p>
-                                  <p className="text-sm">{unit.rent} €</p>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+            <PropertyCard
+              key={property.id}
+              property={property}
+              isExpanded={expandedProperty === property.id}
+              onToggleExpand={() => setExpandedProperty(
+                expandedProperty === property.id ? null : property.id
+              )}
+              onEdit={() => navigate(`/properties/edit/${property.id}`)}
+              onDelete={() => handleDelete(property.id)}
+            />
           ))}
         </div>
       )}
     </div>
-  )
+  );
+}
+```
+
+# frontend/src/components/Mieter/TenantCard.tsx
+
+```tsx
+// src/components/Mieter/TenantCard.tsx
+import { Tenant } from '@/types/tenant';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Eye, Pencil, Mail, Phone, MapPin } from 'lucide-react';
+import { formatDate } from '@/lib/formatters';
+
+interface TenantCardProps {
+  tenant: Tenant;
+  onEdit: () => void;
+  onView: () => void;
 }
 
+export function TenantCard({ tenant, onEdit, onView }: TenantCardProps) {
+  return (
+    <Card className="hover:shadow-md transition-shadow duration-200">
+      <CardContent className="p-4">
+        <div className="flex justify-between items-start">
+          <div>
+            <h3 className="font-semibold text-lg">
+              {tenant.first_name} {tenant.last_name}
+            </h3>
+            {tenant.unit_id && (
+              <p className="text-sm text-muted-foreground">
+                Seit {formatDate(tenant.rent_start_date)}
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onView}
+              className="flex items-center gap-1"
+            >
+              <Eye className="w-4 h-4" />
+              <span className="hidden sm:inline">Details</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onEdit}
+              className="flex items-center gap-1"
+            >
+              <Pencil className="w-4 h-4" />
+              <span className="hidden sm:inline">Bearbeiten</span>
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="flex items-center gap-2 text-sm">
+            <Mail className="w-4 h-4 text-muted-foreground" />
+            <a href={`mailto:${tenant.email}`} className="hover:underline">
+              {tenant.email}
+            </a>
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <Phone className="w-4 h-4 text-muted-foreground" />
+            <a href={`tel:${tenant.phone}`} className="hover:underline">
+              {tenant.phone}
+            </a>
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <MapPin className="w-4 h-4 text-muted-foreground" />
+            <span>{tenant.address}</span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+```
+
+# frontend/src/components/Mieter/TenantDetail.tsx
+
+```tsx
+// src/components/Mieter/TenantDetail.tsx
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { ArrowLeft, Users, Mail, Phone, MapPin, Home, Calendar } from 'lucide-react';
+import { Tenant } from '@/types/tenant';
+import { useAsync } from '@/hooks/useAsync';
+import { TenantService } from '@/services/TenantService';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { formatDate } from '@/lib/formatters';
+
+export default function TenantDetail() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [tenant, setTenant] = useState<Tenant | null>(null);
+
+  const { execute: fetchTenant, isLoading, error } = useAsync(
+    () => TenantService.getById(Number(id)),
+    {
+      errorMessage: 'Fehler beim Laden des Mieters'
+    }
+  );
+
+  useEffect(() => {
+    if (id) {
+      loadTenant();
+    }
+  }, [id]);
+
+  const loadTenant = async () => {
+    try {
+      const data = await fetchTenant();
+      setTenant(data);
+    } catch (error) {
+      console.error('Fehler beim Laden:', error);
+    }
+  };
+
+  if (isLoading) {
+    return <LoadingState />;
+  }
+
+  if (error || !tenant) {
+    return (
+      <ErrorState
+        title="Fehler beim Laden"
+        message={error?.message || 'Mieter nicht gefunden'}
+        onRetry={loadTenant}
+      />
+    );
+  }
+
+  return (
+    <div className="p-4 max-w-5xl mx-auto">
+      {/* Header */}
+      <div className="mb-6">
+        <Button
+          variant="ghost"
+          onClick={() => navigate('/tenants')}
+          className="mb-4"
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Zurück zur Übersicht
+        </Button>
+        
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <Users className="w-6 h-6" />
+              {tenant.first_name} {tenant.last_name}
+            </h1>
+            {tenant.unit_id && (
+              <p className="text-muted-foreground mt-1">
+                Mieter seit {formatDate(tenant.rent_start_date)}
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => navigate(`/tenants/${tenant.id}/documents`)}
+            >
+              Dokumente
+            </Button>
+            <Button
+              onClick={() => navigate(`/tenants/edit/${tenant.id}`)}
+            >
+              Bearbeiten
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Inhalt */}
+      <div className="grid gap-6">
+        {/* Kontaktinformationen */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Kontaktinformationen</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4">
+            <div className="flex items-center gap-3">
+              <Mail className="w-5 h-5 text-muted-foreground" />
+              <div>
+                <p className="font-medium">E-Mail</p>
+                <a href={`mailto:${tenant.email}`} className="text-primary hover:underline">
+                  {tenant.email}
+                </a>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Phone className="w-5 h-5 text-muted-foreground" />
+              <div>
+                <p className="font-medium">Telefon</p>
+                <a href={`tel:${tenant.phone}`} className="text-primary hover:underline">
+                  {tenant.phone}
+                </a>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <MapPin className="w-5 h-5 text-muted-foreground" />
+              <div>
+                <p className="font-medium">Adresse</p>
+                <p>{tenant.address}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Mietverhältnis */}
+        {tenant.unit_id && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Mietverhältnis</CardTitle>
+            </CardHeader>
+            <CardContent className="grid sm:grid-cols-3 gap-4">
+              <div className="flex items-center gap-3">
+                <Home className="w-5 h-5 text-muted-foreground" />
+                <div>
+                  <p className="font-medium">Wohneinheit</p>
+                  <p className="text-muted-foreground">
+                    {/* TODO: Unit-Details ergänzen */}
+                    Wohneinheit {tenant.unit_id}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Calendar className="w-5 h-5 text-muted-foreground" />
+                <div>
+                  <p className="font-medium">Mietbeginn</p>
+                  <p className="text-muted-foreground">
+                    {formatDate(tenant.rent_start_date)}
+                  </p>
+                </div>
+              </div>
+              {tenant.rent_end_date && (
+                <div className="flex items-center gap-3">
+                  <Calendar className="w-5 h-5 text-muted-foreground" />
+                  <div>
+                    <p className="font-medium">Mietende</p>
+                    <p className="text-muted-foreground">
+                      {formatDate(tenant.rent_end_date)}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
 ```
 
 # frontend/src/components/Mieter/TenantEditWrapper.tsx
 
 ```tsx
-import { useState, useEffect } from 'react';
+// src/components/Mieter/TenantEditWrapper.tsx
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import TenantForm from './TenantForm';
+import { Tenant } from '@/types/tenant';
+import { useAsync } from '@/hooks/useAsync';
+import { TenantService } from '@/services/TenantService';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
 
 export default function TenantEditWrapper() {
-  const { id } = useParams();
-  const [tenant, setTenant] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  
-  useEffect(() => {
-    const loadTenant = async () => {
-      try {
-        const response = await fetch(`http://localhost:3001/tenants/${id}`);
-        if (!response.ok) throw new Error('Laden fehlgeschlagen');
-        const data = await response.json();
-        setTenant(data);
-      } catch (error) {
-        console.error('Fehler beim Laden:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  const { id } = useParams<{ id: string }>();
+  const [tenant, setTenant] = useState<Tenant | null>(null);
 
-    loadTenant();
+  const { execute: fetchTenant, isLoading, error } = useAsync(
+    () => TenantService.getById(Number(id)),
+    {
+      errorMessage: 'Fehler beim Laden des Mieters'
+    }
+  );
+
+  useEffect(() => {
+    if (id) {
+      loadTenant();
+    }
   }, [id]);
 
-  if (isLoading) return <div>Lade...</div>;
-  if (!tenant) return <div>Mieter nicht gefunden</div>;
-  
+  const loadTenant = async () => {
+    try {
+      const data = await fetchTenant();
+      setTenant(data);
+    } catch (error) {
+      console.error('Fehler beim Laden:', error);
+    }
+  };
+
+  if (isLoading) {
+    return <LoadingState />;
+  }
+
+  if (error || !tenant) {
+    return (
+      <ErrorState
+        title="Fehler beim Laden"
+        message={error?.message || 'Mieter nicht gefunden'}
+        onRetry={loadTenant}
+      />
+    );
+  }
+
   return <TenantForm initialData={tenant} />;
 }
 ```
@@ -3400,7 +4600,8 @@ export default function TenantEditWrapper() {
 # frontend/src/components/Mieter/TenantForm.tsx
 
 ```tsx
-import { useState, useEffect } from 'react';
+// src/components/Mieter/TenantForm.tsx
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -3412,107 +4613,169 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-interface Unit {
-  id: number;
-  name: string;
-  property_address: string;
-  status: string;
-}
-
-interface Tenant {
-  id?: number;
-  first_name: string;
-  last_name: string;
-  email: string;
-  phone: string;
-  address: string;
-  unit_id?: number;
-  rent_start_date?: string;
-}
+import { TenantService } from '@/services/TenantService';
+import { PropertyService } from '@/services/PropertyService';
+import { useAsync } from '@/hooks/useAsync';
+import { useFormState } from '@/hooks/useFormState';
+import { useConfirmation } from '@/hooks/useConfirmation';
+import { Tenant, TenantFormData } from '@/types/tenant';
+import { Property, Unit } from '@/types/property';
+import { required, email, phone } from '@/lib/validators';
 
 interface TenantFormProps {
   initialData?: Tenant;
 }
 
+const INITIAL_TENANT_DATA: TenantFormData = {
+  first_name: '',
+  last_name: '',
+  email: '',
+  phone: '',
+  address: '',
+  unit_id: null,
+  rent_start_date: new Date().toISOString().split('T')[0],
+  rent_end_date: null
+};
+
 export default function TenantForm({ initialData }: TenantFormProps) {
   const navigate = useNavigate();
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [availableUnits, setAvailableUnits] = useState<Unit[]>([]);
+  
+  const {
+    formData,
+    updateField,
+    errors,
+    setErrors,
+    validateField
+  } = useFormState<TenantFormData>(
+    initialData || INITIAL_TENANT_DATA
+  );
 
-  // Form State mit initialData oder Defaultwerten
-  const [tenant, setTenant] = useState<Tenant>(() => ({
-    first_name: initialData?.first_name || '',
-    last_name: initialData?.last_name || '',
-    email: initialData?.email || '',
-    phone: initialData?.phone || '',
-    address: initialData?.address || '',
-    unit_id: initialData?.unit_id,
-    rent_start_date: initialData?.rent_start_date || new Date().toISOString().split('T')[0]
-  }));
+  // API calls
+  const { execute: saveTenant, isLoading: isSaving } = useAsync(
+    async (data: TenantFormData) => {
+      if (initialData) {
+        return TenantService.update(initialData.id, data);
+      }
+      return TenantService.create(data);
+    },
+    {
+      successMessage: initialData 
+        ? 'Mieter wurde erfolgreich aktualisiert'
+        : 'Mieter wurde erfolgreich erstellt',
+      errorMessage: 'Fehler beim Speichern des Mieters'
+    }
+  );
 
-  // Lade verfügbare Units
+  const { execute: fetchAvailableUnits } = useAsync(
+    () => PropertyService.getAll(),
+    {
+      errorMessage: 'Fehler beim Laden der verfügbaren Wohneinheiten'
+    }
+  );
+
+  // Confirmation Dialog
+  const confirmDiscardDialog = useConfirmation({
+    title: 'Änderungen verwerfen?',
+    message: 'Möchten Sie die Bearbeitung wirklich abbrechen? Alle nicht gespeicherten Änderungen gehen verloren.',
+    confirmText: 'Verwerfen',
+    cancelText: 'Weiter bearbeiten'
+  });
+
+  // Load available units on mount
   useEffect(() => {
-    const loadAvailableUnits = async () => {
-      try {
-        const response = await fetch('http://localhost:3001/properties');
-        if (!response.ok) throw new Error('Laden fehlgeschlagen');
-        const properties = await response.json();
-        
-        // Extrahiere alle verfügbaren Units aus den Properties
-        const units = properties.flatMap((property: any) => 
-          property.units
-            .filter((unit: any) => 
-              unit.status === 'verfügbar' || unit.id === initialData?.unit_id
-            )
-            .map((unit: any) => ({
-              ...unit,
-              property_address: property.address
-            }))
-        );
-        
-        setAvailableUnits(units);
-      } catch (error) {
-        console.error('Fehler beim Laden der Units:', error);
-      }
-    };
-
     loadAvailableUnits();
-  }, [initialData?.unit_id]);
+  }, []);
 
-  // Form Submit Handler
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-
+  const loadAvailableUnits = async () => {
     try {
-      const url = initialData
-        ? `http://localhost:3001/tenants/${initialData.id}`
-        : 'http://localhost:3001/tenants';
-
-      const response = await fetch(url, {
-        method: initialData ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(tenant)
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Ein Fehler ist aufgetreten');
-      }
-
-      navigate('/tenants');
+      const properties = await fetchAvailableUnits();
+      const units = properties.flatMap(property => 
+        property.units
+          .filter(unit => unit.status === 'verfügbar' || unit.id === initialData?.unit_id)
+          .map(unit => ({
+            ...unit,
+            property_address: property.address
+          }))
+      );
+      setAvailableUnits(units);
     } catch (error) {
-      console.error('Fehler beim Speichern:', error);
-      alert(error instanceof Error ? error.message : 'Ein Fehler ist aufgetreten');
-    } finally {
-      setIsSubmitting(false);
+      console.error('Fehler beim Laden der Wohneinheiten:', error);
     }
   };
 
+  // Form validation
+  const validateForm = (): boolean => {
+    let isValid = true;
+    const newErrors: Partial<Record<keyof TenantFormData, string>> = {};
+
+    // Required fields
+    if (!required(formData.first_name)) {
+      newErrors.first_name = 'Vorname ist erforderlich';
+      isValid = false;
+    }
+
+    if (!required(formData.last_name)) {
+      newErrors.last_name = 'Nachname ist erforderlich';
+      isValid = false;
+    }
+
+    const emailError = email(formData.email);
+    if (emailError) {
+      newErrors.email = emailError;
+      isValid = false;
+    }
+
+    const phoneError = phone(formData.phone);
+    if (phoneError) {
+      newErrors.phone = phoneError;
+      isValid = false;
+    }
+
+    if (!required(formData.address)) {
+      newErrors.address = 'Adresse ist erforderlich';
+      isValid = false;
+    }
+
+    if (!required(formData.rent_start_date)) {
+      newErrors.rent_start_date = 'Mietbeginn ist erforderlich';
+      isValid = false;
+    }
+
+    setErrors(newErrors);
+    return isValid;
+  };
+
+  // Form submission
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
+    }
+
+    try {
+      await saveTenant(formData);
+      navigate('/tenants');
+    } catch (error) {
+      // Error wird bereits durch useAsync behandelt
+    }
+  };
+
+  // Cancel handling
+  const handleCancel = async () => {
+    const hasChanges = JSON.stringify(initialData) !== JSON.stringify(formData);
+    if (hasChanges) {
+      const confirmed = await confirmDiscardDialog.confirm();
+      if (!confirmed) return;
+    }
+    navigate('/tenants');
+  };
+
   return (
-    <div className="p-4 max-w-2xl mx-auto">
+    <div className="p-4 max-w-3xl mx-auto">
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Persönliche Informationen */}
         <Card>
           <CardHeader>
             <CardTitle>
@@ -3520,113 +4783,157 @@ export default function TenantForm({ initialData }: TenantFormProps) {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Persönliche Daten */}
             <div className="grid grid-cols-2 gap-4">
+              {/* Vorname */}
               <div>
                 <label className="text-sm font-medium">Vorname</label>
                 <Input
-                  required
-                  value={tenant.first_name}
-                  onChange={e => setTenant({ ...tenant, first_name: e.target.value })}
+                  value={formData.first_name}
+                  onChange={e => updateField('first_name', e.target.value)}
                   className="mt-1"
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                 />
+                {errors.first_name && (
+                  <p className="text-sm text-destructive mt-1">{errors.first_name}</p>
+                )}
               </div>
 
+              {/* Nachname */}
               <div>
                 <label className="text-sm font-medium">Nachname</label>
                 <Input
-                  required
-                  value={tenant.last_name}
-                  onChange={e => setTenant({ ...tenant, last_name: e.target.value })}
+                  value={formData.last_name}
+                  onChange={e => updateField('last_name', e.target.value)}
                   className="mt-1"
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                 />
+                {errors.last_name && (
+                  <p className="text-sm text-destructive mt-1">{errors.last_name}</p>
+                )}
               </div>
 
+              {/* Email */}
               <div>
                 <label className="text-sm font-medium">E-Mail</label>
                 <Input
                   type="email"
-                  value={tenant.email}
-                  onChange={e => setTenant({ ...tenant, email: e.target.value })}
+                  value={formData.email}
+                  onChange={e => updateField('email', e.target.value)}
                   className="mt-1"
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                 />
+                {errors.email && (
+                  <p className="text-sm text-destructive mt-1">{errors.email}</p>
+                )}
               </div>
 
+              {/* Telefon */}
               <div>
                 <label className="text-sm font-medium">Telefon</label>
                 <Input
                   type="tel"
-                  value={tenant.phone}
-                  onChange={e => setTenant({ ...tenant, phone: e.target.value })}
+                  value={formData.phone}
+                  onChange={e => updateField('phone', e.target.value)}
                   className="mt-1"
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                 />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium">Adresse</label>
-              <Input
-                value={tenant.address}
-                onChange={e => setTenant({ ...tenant, address: e.target.value })}
-                className="mt-1"
-                disabled={isSubmitting}
-              />
-            </div>
-
-            {/* Wohneinheit und Mietbeginn */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium">Wohneinheit</label>
-                <Select
-                  value={tenant.unit_id?.toString()}
-                  onValueChange={(value) => 
-                    setTenant({ ...tenant, unit_id: parseInt(value) })
-                  }
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Wohneinheit auswählen" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableUnits.map((unit) => (
-                      <SelectItem key={unit.id} value={unit.id.toString()}>
-                        {unit.name} ({unit.property_address})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {errors.phone && (
+                  <p className="text-sm text-destructive mt-1">{errors.phone}</p>
+                )}
               </div>
 
-              <div>
-                <label className="text-sm font-medium">Mietbeginn</label>
+              {/* Adresse */}
+              <div className="col-span-2">
+                <label className="text-sm font-medium">Adresse</label>
                 <Input
-                  type="date"
-                  value={tenant.rent_start_date}
-                  onChange={e => setTenant({ ...tenant, rent_start_date: e.target.value })}
+                  value={formData.address}
+                  onChange={e => updateField('address', e.target.value)}
                   className="mt-1"
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                 />
+                {errors.address && (
+                  <p className="text-sm text-destructive mt-1">{errors.address}</p>
+                )}
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Formular-Buttons */}
-        <div className="flex gap-4">
+        {/* Mietverhältnis */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Mietverhältnis</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Wohneinheit */}
+            <div>
+              <label className="text-sm font-medium">Wohneinheit</label>
+              <Select
+                value={formData.unit_id?.toString() || ''}
+                onValueChange={(value) => updateField('unit_id', value ? parseInt(value) : null)}
+                disabled={isSaving}
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Wohneinheit wählen" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Keine Wohneinheit</SelectItem>
+                  {availableUnits.map((unit) => (
+                    <SelectItem key={unit.id} value={unit.id.toString()}>
+                      {unit.name} ({unit.property_address})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              {/* Mietbeginn */}
+              <div>
+                <label className="text-sm font-medium">Mietbeginn</label>
+                <Input
+                  type="date"
+                  value={formData.rent_start_date}
+                  onChange={e => updateField('rent_start_date', e.target.value)}
+                  className="mt-1"
+                  disabled={isSaving}
+                />
+                {errors.rent_start_date && (
+                  <p className="text-sm text-destructive mt-1">{errors.rent_start_date}</p>
+                )}
+              </div>
+
+              {/* Mietende */}
+              <div>
+                <label className="text-sm font-medium">Mietende (optional)</label>
+                <Input
+                  type="date"
+                  value={formData.rent_end_date || ''}
+                  onChange={e => updateField('rent_end_date', e.target.value || null)}
+                  className="mt-1"
+                  disabled={isSaving}
+                />
+                {errors.rent_end_date && (
+                  <p className="text-sm text-destructive mt-1">{errors.rent_end_date}</p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Form Buttons */}
+        <div className="flex justify-end gap-4">
           <Button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSaving}
           >
-            {isSubmitting ? 'Wird gespeichert...' : 'Speichern'}
+            {isSaving ? 'Wird gespeichert...' : 'Speichern'}
           </Button>
           <Button
             type="button"
             variant="outline"
-            onClick={() => navigate('/tenants')}
-            disabled={isSubmitting}
+            onClick={handleCancel}
+            disabled={isSaving}
           >
             Abbrechen
           </Button>
@@ -3643,225 +4950,437 @@ export default function TenantForm({ initialData }: TenantFormProps) {
 // src/components/Mieter/TenantList.tsx
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { PlusCircle, Pencil, Trash2, UserPlus } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
-import { SkeletonCard } from '@/components/ui/Skeleton-Card';
-import { ErrorCard } from '@/components/ui/Error-Card';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/AlertDialog';
-
-interface Tenant {
-  id: number;
-  first_name: string;
-  last_name: string;
-  email: string;
-  phone: string;
-  address: string;
-  unit_name?: string;
-  unit_type?: string;
-  property_address?: string;
-}
+import { Input } from '@/components/ui/input';
+import { UserPlus, Users, Search } from 'lucide-react';
+import { Tenant } from '@/types/tenant';
+import { useAsync } from '@/hooks/useAsync';
+import { TenantService } from '@/services/TenantService';
+import { TenantCard } from '@/components/Mieter/TenantCard';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
 
 export default function TenantList() {
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [isDeleting, setIsDeleting] = useState<number | null>(null);
-  const [tenantToDelete, setTenantToDelete] = useState<Tenant | null>(null);
   const navigate = useNavigate();
-  const { showSuccessToast, showErrorToast } = useToast();
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
 
-  const loadTenants = async () => {
-    try {
-      setError(null);
-      const response = await fetch('http://localhost:3001/tenants');
-      if (!response.ok) throw new Error('Laden fehlgeschlagen');
-      const data = await response.json();
-      setTenants(data);
-    } catch (error) {
-      console.error('Fehler beim Laden:', error);
-      setError('Die Mieter konnten nicht geladen werden.');
-    } finally {
-      setIsLoading(false);
+  const { execute: fetchTenants, isLoading, error } = useAsync<Tenant[]>(
+    () => TenantService.getAll(),
+    {
+      errorMessage: 'Fehler beim Laden der Mieter'
     }
-  };
+  );
 
   useEffect(() => {
     loadTenants();
   }, []);
 
-  const handleDelete = async (tenant: Tenant) => {
-    setTenantToDelete(tenant);
-  };
-
-  const confirmDelete = async () => {
-    if (!tenantToDelete) return;
-    
-    setIsDeleting(tenantToDelete.id);
+  const loadTenants = async () => {
     try {
-      const response = await fetch(`http://localhost:3001/tenants/${tenantToDelete.id}`, {
-        method: 'DELETE'
-      });
-
-      if (!response.ok) throw new Error('Löschen fehlgeschlagen');
-      
-      await loadTenants();
-      showSuccessToast(
-        'Mieter gelöscht',
-        'Der Mieter wurde erfolgreich gelöscht.'
-      );
+      const data = await fetchTenants();
+      setTenants(data);
     } catch (error) {
-      console.error('Fehler beim Löschen:', error);
-      showErrorToast(
-        'Fehler beim Löschen',
-        'Der Mieter konnte nicht gelöscht werden.'
-      );
-    } finally {
-      setIsDeleting(null);
-      setTenantToDelete(null);
+      console.error('Fehler beim Laden:', error);
     }
   };
 
+  const filteredTenants = tenants.filter(tenant => 
+    tenant.first_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    tenant.last_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    tenant.email.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   if (isLoading) {
-    return (
-      <div className="p-4 max-w-4xl mx-auto space-y-4">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold">Mieterverwaltung</h1>
-        </div>
-        {[1, 2, 3].map((i) => (
-          <SkeletonCard key={i} />
-        ))}
-      </div>
-    );
+    return <LoadingState />;
   }
 
   if (error) {
     return (
-      <div className="p-4 max-w-4xl mx-auto">
-        <ErrorCard
-          title="Fehler beim Laden"
-          message={error}
-          onRetry={loadTenants}
-        />
-      </div>
+      <ErrorState
+        title="Fehler beim Laden"
+        message={error.message}
+        onRetry={loadTenants}
+      />
     );
   }
 
   return (
-    <div className="p-4 max-w-4xl mx-auto">
+    <div className="p-4 max-w-5xl mx-auto">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Mieterverwaltung</h1>
+        <div className="flex items-center gap-2">
+          <Users className="w-6 h-6" />
+          <h1 className="text-2xl font-bold">Mieter</h1>
+        </div>
         <Button
-          className="flex items-center gap-2"
           onClick={() => navigate('/tenants/new')}
+          className="flex items-center gap-2"
         >
           <UserPlus className="w-4 h-4" />
           Neuer Mieter
         </Button>
       </div>
 
+      {/* Suchleiste */}
+      <div className="mb-6">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            placeholder="Mieter suchen..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+      </div>
+
       {tenants.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <p className="text-muted-foreground mb-4">Keine Mieter vorhanden</p>
-            <Button
-              onClick={() => navigate('/tenants/new')}
-              className="flex items-center gap-2"
-            >
-              <PlusCircle className="w-4 h-4" />
-              Ersten Mieter hinzufügen
-            </Button>
-          </CardContent>
+        <EmptyState
+          title="Keine Mieter vorhanden"
+          description="Fügen Sie Ihren ersten Mieter hinzu"
+          icon={<Users className="w-12 h-12 text-muted-foreground" />}
+          action={{
+            label: 'Ersten Mieter hinzufügen',
+            onClick: () => navigate('/tenants/new')
+          }}
+        />
+      ) : filteredTenants.length === 0 ? (
+        <Card className="p-6 text-center">
+          <p className="text-muted-foreground">
+            Keine Mieter gefunden für "{searchTerm}"
+          </p>
         </Card>
       ) : (
         <div className="grid gap-4">
-          {tenants.map(tenant => (
-            <Card 
+          {filteredTenants.map(tenant => (
+            <TenantCard
               key={tenant.id}
-              className="transition-all duration-200 hover:border-primary/50"
-            >
-              <CardHeader>
-                <div className="flex justify-between items-start">
-                  <CardTitle>
-                    {tenant.first_name} {tenant.last_name}
-                  </CardTitle>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => navigate(`/tenants/edit/${tenant.id}`)}
-                      disabled={isDeleting === tenant.id}
-                      className="transition-colors hover:border-primary"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleDelete(tenant)}
-                      disabled={isDeleting === tenant.id}
-                      className="transition-colors hover:border-destructive hover:text-destructive"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-500">Kontakt</p>
-                    <p>{tenant.email}</p>
-                    <p>{tenant.phone}</p>
-                    <p>{tenant.address}</p>
-                  </div>
-                  {tenant.unit_name && (
-                    <div>
-                      <p className="text-sm text-gray-500">Wohneinheit</p>
-                      <p>{tenant.unit_name}</p>
-                      <p>{tenant.property_address}</p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+              tenant={tenant}
+              onEdit={() => navigate(`/tenants/edit/${tenant.id}`)}
+              onView={() => navigate(`/tenants/${tenant.id}`)}
+            />
           ))}
         </div>
       )}
+    </div>
+  );
+}
+```
 
-      <AlertDialog 
-        open={tenantToDelete !== null}
-        onOpenChange={(open) => !open && setTenantToDelete(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Mieter löschen?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Möchten Sie den Mieter {tenantToDelete?.first_name} {tenantToDelete?.last_name} wirklich löschen?
-              Diese Aktion kann nicht rückgängig gemacht werden.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={confirmDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+# frontend/src/components/Mitarbeiter/WorkerCard.tsx
+
+```tsx
+// src/components/Mitarbeiter/WorkerCard.tsx
+import { Worker } from '@/types/worker';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Eye, Pencil, Mail, Phone, Euro, Wrench } from 'lucide-react';
+import { formatCurrency } from '@/lib/formatters';
+
+interface WorkerCardProps {
+  worker: Worker;
+  onEdit: () => void;
+  onView: () => void;
+}
+
+export function WorkerCard({ worker, onEdit, onView }: WorkerCardProps) {
+  return (
+    <Card className="hover:shadow-md transition-shadow duration-200">
+      <CardContent className="p-4">
+        <div className="flex justify-between items-start">
+          <div>
+            <h3 className="font-semibold text-lg">
+              {worker.first_name} {worker.last_name}
+            </h3>
+            <div className="flex gap-2 mt-1">
+              {worker.skills.map((skill, index) => (
+                <span 
+                  key={skill.id}
+                  className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-secondary"
+                >
+                  {skill.name} ({skill.experience_years}J)
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onView}
+              className="flex items-center gap-1"
             >
-              Löschen
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+              <Eye className="w-4 h-4" />
+              <span className="hidden sm:inline">Details</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onEdit}
+              className="flex items-center gap-1"
+            >
+              <Pencil className="w-4 h-4" />
+              <span className="hidden sm:inline">Bearbeiten</span>
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="flex items-center gap-2 text-sm">
+            <Mail className="w-4 h-4 text-muted-foreground" />
+            <a href={`mailto:${worker.email}`} className="hover:underline">
+              {worker.email}
+            </a>
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <Phone className="w-4 h-4 text-muted-foreground" />
+            <a href={`tel:${worker.phone}`} className="hover:underline">
+              {worker.phone}
+            </a>
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <Euro className="w-4 h-4 text-muted-foreground" />
+            <span>{formatCurrency(worker.hourly_rate)}/Std.</span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+```
+
+# frontend/src/components/Mitarbeiter/WorkerDetail.tsx
+
+```tsx
+// src/components/Mitarbeiter/WorkerDetail.tsx
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { 
+  ArrowLeft, 
+  Wrench, 
+  Mail, 
+  Phone, 
+  Euro, 
+  Clock,
+  Calendar,
+  CheckCircle,
+  XCircle
+} from 'lucide-react';
+import { Worker } from '@/types/worker';
+import { useAsync } from '@/hooks/useAsync';
+import { WorkerService } from '@/services/WorkerService';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { formatCurrency } from '@/lib/formatters';
+
+export default function WorkerDetail() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [worker, setWorker] = useState<Worker | null>(null);
+
+  const { execute: fetchWorker, isLoading, error } = useAsync(
+    () => WorkerService.getById(Number(id)),
+    {
+      errorMessage: 'Fehler beim Laden des Handwerkers'
+    }
+  );
+
+  useEffect(() => {
+    if (id) {
+      loadWorker();
+    }
+  }, [id]);
+
+  const loadWorker = async () => {
+    try {
+      const data = await fetchWorker();
+      setWorker(data);
+    } catch (error) {
+      console.error('Fehler beim Laden:', error);
+    }
+  };
+
+  if (isLoading) {
+    return <LoadingState />;
+  }
+
+  if (error || !worker) {
+    return (
+      <ErrorState
+        title="Fehler beim Laden"
+        message={error?.message || 'Handwerker nicht gefunden'}
+        onRetry={loadWorker}
+      />
+    );
+  }
+
+  return (
+    <div className="p-4 max-w-5xl mx-auto">
+      {/* Header mit Navigation und Aktionen */}
+      <div className="mb-6">
+        <Button
+          variant="ghost"
+          onClick={() => navigate('/workers')}
+          className="mb-4"
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Zurück zur Übersicht
+        </Button>
+        
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <Wrench className="w-6 h-6" />
+              {worker.first_name} {worker.last_name}
+            </h1>
+            <div className="flex items-center gap-2 mt-1">
+              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-sm ${
+                worker.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+              }`}>
+                {worker.active ? (
+                  <CheckCircle className="w-4 h-4" />
+                ) : (
+                  <XCircle className="w-4 h-4" />
+                )}
+                {worker.active ? 'Aktiv' : 'Inaktiv'}
+              </span>
+              <span className="text-muted-foreground">
+                Stundensatz: {formatCurrency(worker.hourly_rate)}/Std.
+              </span>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => navigate(`/workers/${worker.id}/assignments`)}
+            >
+              Aufträge
+            </Button>
+            <Button
+              onClick={() => navigate(`/workers/edit/${worker.id}`)}
+            >
+              Bearbeiten
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Hauptinhalt */}
+      <div className="grid gap-6">
+        {/* Kontaktinformationen */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Kontaktinformationen</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4">
+            <div className="flex items-center gap-3">
+              <Mail className="w-5 h-5 text-muted-foreground" />
+              <div>
+                <p className="font-medium">E-Mail</p>
+                <a 
+                  href={`mailto:${worker.email}`} 
+                  className="text-primary hover:underline"
+                >
+                  {worker.email}
+                </a>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Phone className="w-5 h-5 text-muted-foreground" />
+              <div>
+                <p className="font-medium">Telefon</p>
+                <a 
+                  href={`tel:${worker.phone}`} 
+                  className="text-primary hover:underline"
+                >
+                  {worker.phone}
+                </a>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Euro className="w-5 h-5 text-muted-foreground" />
+              <div>
+                <p className="font-medium">Stundensatz</p>
+                <p>{formatCurrency(worker.hourly_rate)}/Std.</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Fähigkeiten */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Fähigkeiten & Qualifikationen</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4">
+              {worker.skills.map((skill) => (
+                <div 
+                  key={skill.id}
+                  className="flex items-center justify-between p-4 bg-secondary/50 rounded-lg hover:bg-secondary transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                      <Wrench className="w-5 h-5 text-primary" />
+                    </div>
+                    <div>
+                      <p className="font-medium">{skill.name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {skill.experience_years} Jahre Erfahrung
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-background">
+                    <Clock className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">
+                      {skill.experience_years} Jahre
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Verfügbarkeit und Termine */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Verfügbarkeit & Termine</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4">
+              {/* TODO: Kalenderintegration */}
+              <p className="text-muted-foreground text-center py-4">
+                Kalenderfunktion wird in Kürze verfügbar sein
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Dokumente */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Dokumente</CardTitle>
+            <Button variant="outline" size="sm">
+              Dokument hinzufügen
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4">
+              {/* TODO: Dokumentenliste */}
+              <p className="text-muted-foreground text-center py-4">
+                Noch keine Dokumente vorhanden
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
@@ -3870,37 +5389,56 @@ export default function TenantList() {
 # frontend/src/components/Mitarbeiter/WorkerEditWrapper.tsx
 
 ```tsx
-// src/components/Handwerker/WorkerEditWrapper.tsx
-import { useState, useEffect } from 'react';
+// src/components/Mitarbeiter/WorkerEditWrapper.tsx
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import WorkerForm from './WorkerForm';
 import { Worker } from '@/types/worker';
+import { useAsync } from '@/hooks/useAsync';
+import { WorkerService } from '@/services/WorkerService';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
 
 export default function WorkerEditWrapper() {
-  const { id } = useParams();
+  const { id } = useParams<{ id: string }>();
   const [worker, setWorker] = useState<Worker | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  
-  useEffect(() => {
-    const loadWorker = async () => {
-      try {
-        const response = await fetch(`http://localhost:3001/workers/${id}`);
-        if (!response.ok) throw new Error('Laden fehlgeschlagen');
-        const data = await response.json();
-        setWorker(data);
-      } catch (error) {
-        console.error('Fehler beim Laden:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
 
-    loadWorker();
+  const { execute: fetchWorker, isLoading, error } = useAsync(
+    () => WorkerService.getById(Number(id)),
+    {
+      errorMessage: 'Fehler beim Laden des Handwerkers'
+    }
+  );
+
+  useEffect(() => {
+    if (id) {
+      loadWorker();
+    }
   }, [id]);
 
-  if (isLoading) return <div>Lade...</div>;
-  if (!worker) return <div>Handwerker nicht gefunden</div>;
-  
+  const loadWorker = async () => {
+    try {
+      const data = await fetchWorker();
+      setWorker(data);
+    } catch (error) {
+      console.error('Fehler beim Laden:', error);
+    }
+  };
+
+  if (isLoading) {
+    return <LoadingState />;
+  }
+
+  if (error || !worker) {
+    return (
+      <ErrorState
+        title="Fehler beim Laden"
+        message={error?.message || 'Handwerker nicht gefunden'}
+        onRetry={loadWorker}
+      />
+    );
+  }
+
   return <WorkerForm initialData={worker} />;
 }
 ```
@@ -3908,8 +5446,8 @@ export default function WorkerEditWrapper() {
 # frontend/src/components/Mitarbeiter/WorkerForm.tsx
 
 ```tsx
-// src/components/Handwerker/WorkerForm.tsx
-import { useState, useEffect } from 'react';
+// src/components/Mitarbeiter/WorkerForm.tsx
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -3922,99 +5460,185 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Plus, X } from 'lucide-react';
-import { Worker, Skill, WorkerSkill } from '@/types/worker';
+import { WorkerService } from '@/services/WorkerService';
+import { useAsync } from '@/hooks/useAsync';
+import { useFormState } from '@/hooks/useFormState';
+import { useConfirmation } from '@/hooks/useConfirmation';
+import { Worker, WorkerFormData, Skill, WorkerSkill } from '@/types/worker';
+import { required, email, phone, number } from '@/lib/validators';
 
 interface WorkerFormProps {
   initialData?: Worker;
 }
 
+const INITIAL_WORKER_DATA: WorkerFormData = {
+  first_name: '',
+  last_name: '',
+  email: '',
+  phone: '',
+  hourly_rate: '',
+  skills: [],
+  active: true
+};
+
+const INITIAL_SKILL: WorkerSkill = {
+  id: 0,
+  name: '',
+  experience_years: 0
+};
+
 export default function WorkerForm({ initialData }: WorkerFormProps) {
   const navigate = useNavigate();
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([]);
-  
-  // Formular-State mit initialData oder Defaultwerten
-  const [worker, setWorker] = useState<Worker>(() => ({
-    first_name: initialData?.first_name || '',
-    last_name: initialData?.last_name || '',
-    phone: initialData?.phone || '',
-    email: initialData?.email || '',
-    hourly_rate: initialData?.hourly_rate || '',
-    skills: initialData?.skills || [],
-    active: initialData?.active ?? true
-  }));
 
-  // Lade verfügbare Skills
-  useEffect(() => {
-    const loadSkills = async () => {
-      try {
-        const response = await fetch('http://localhost:3001/workers/skills');
-        if (!response.ok) throw new Error('Laden fehlgeschlagen');
-        const data = await response.json();
-        setAvailableSkills(data);
-      } catch (error) {
-        console.error('Fehler beim Laden der Skills:', error);
+  // Form state mit initialData oder default values
+  const {
+    formData,
+    updateField,
+    errors,
+    setErrors,
+    validateField,
+    resetForm
+  } = useFormState<WorkerFormData>(
+    initialData || INITIAL_WORKER_DATA
+  );
+
+  // API calls mit useAsync
+  const { execute: saveWorker, isLoading: isSaving } = useAsync(
+    async (data: WorkerFormData) => {
+      if (initialData) {
+        return WorkerService.update(initialData.id, data);
       }
-    };
+      return WorkerService.create(data);
+    },
+    {
+      successMessage: initialData 
+        ? 'Handwerker wurde erfolgreich aktualisiert'
+        : 'Handwerker wurde erfolgreich erstellt',
+      errorMessage: 'Fehler beim Speichern des Handwerkers'
+    }
+  );
 
+  const { execute: fetchSkills } = useAsync(
+    () => WorkerService.getSkills(),
+    {
+      errorMessage: 'Fehler beim Laden der verfügbaren Fähigkeiten'
+    }
+  );
+
+  // Confirmation Dialog
+  const confirmDiscardDialog = useConfirmation({
+    title: 'Änderungen verwerfen?',
+    message: 'Möchten Sie die Bearbeitung wirklich abbrechen? Alle nicht gespeicherten Änderungen gehen verloren.',
+    confirmText: 'Verwerfen',
+    cancelText: 'Weiter bearbeiten'
+  });
+
+  // Load skills on mount
+  useEffect(() => {
     loadSkills();
   }, []);
 
-  const handleAddSkill = () => {
-    setWorker(prev => ({
-      ...prev,
-      skills: [...prev.skills, { id: 0, experience_years: 0 }]
-    }));
-  };
-
-  const handleRemoveSkill = (index: number) => {
-    setWorker(prev => ({
-      ...prev,
-      skills: prev.skills.filter((_, i) => i !== index)
-    }));
-  };
-
-  const updateSkill = (index: number, field: keyof WorkerSkill, value: any) => {
-    setWorker(prev => ({
-      ...prev,
-      skills: prev.skills.map((skill, i) => {
-        if (i !== index) return skill;
-        return { ...skill, [field]: field === 'id' ? parseInt(value) : value };
-      })
-    }));
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-
+  const loadSkills = async () => {
     try {
-      const url = initialData
-        ? `http://localhost:3001/workers/${initialData.id}`
-        : 'http://localhost:3001/workers';
-
-      const response = await fetch(url, {
-        method: initialData ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...worker,
-          hourly_rate: worker.hourly_rate === '' ? null : Number(worker.hourly_rate)
-        })
-      });
-
-      if (!response.ok) throw new Error('Speichern fehlgeschlagen');
-      navigate('/workers');
+      const skills = await fetchSkills();
+      setAvailableSkills(skills);
     } catch (error) {
-      console.error('Fehler beim Speichern:', error);
-      alert('Fehler beim Speichern des Handwerkers');
-    } finally {
-      setIsSubmitting(false);
+      console.error('Fehler beim Laden der Fähigkeiten:', error);
     }
   };
 
+  // Form validation
+  const validateForm = (): boolean => {
+    let isValid = true;
+    const newErrors: Partial<Record<keyof WorkerFormData, string>> = {};
+
+    // Required fields
+    if (!required(formData.first_name)) {
+      newErrors.first_name = 'Vorname ist erforderlich';
+      isValid = false;
+    }
+
+    if (!required(formData.last_name)) {
+      newErrors.last_name = 'Nachname ist erforderlich';
+      isValid = false;
+    }
+
+    const emailError = email(formData.email);
+    if (emailError) {
+      newErrors.email = emailError;
+      isValid = false;
+    }
+
+    const phoneError = phone(formData.phone);
+    if (phoneError) {
+      newErrors.phone = phoneError;
+      isValid = false;
+    }
+
+    if (!number(String(formData.hourly_rate))) {
+      newErrors.hourly_rate = 'Gültiger Stundensatz erforderlich';
+      isValid = false;
+    }
+
+    // At least one skill required
+    if (formData.skills.length === 0) {
+      newErrors.skills = 'Mindestens eine Fähigkeit ist erforderlich';
+      isValid = false;
+    }
+
+    setErrors(newErrors);
+    return isValid;
+  };
+
+  // Form submission
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
+    }
+
+    try {
+      await saveWorker(formData);
+      navigate('/workers');
+    } catch (error) {
+      // Error wird bereits durch useAsync behandelt
+    }
+  };
+
+  // Cancel handling
+  const handleCancel = async () => {
+    const hasChanges = JSON.stringify(initialData) !== JSON.stringify(formData);
+    if (hasChanges) {
+      const confirmed = await confirmDiscardDialog.confirm();
+      if (!confirmed) return;
+    }
+    navigate('/workers');
+  };
+
+  // Skill management
+  const addSkill = () => {
+    updateField('skills', [...formData.skills, { ...INITIAL_SKILL }]);
+  };
+
+  const removeSkill = (index: number) => {
+    const newSkills = formData.skills.filter((_, i) => i !== index);
+    updateField('skills', newSkills);
+  };
+
+  const updateSkill = (index: number, field: keyof WorkerSkill, value: any) => {
+    const newSkills = formData.skills.map((skill, i) => {
+      if (i !== index) return skill;
+      return { ...skill, [field]: value };
+    });
+    updateField('skills', newSkills);
+  };
+
   return (
-    <div className="p-4 max-w-2xl mx-auto">
+    <div className="p-4 max-w-3xl mx-auto">
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Persönliche Informationen */}
         <Card>
           <CardHeader>
             <CardTitle>
@@ -4022,152 +5646,191 @@ export default function WorkerForm({ initialData }: WorkerFormProps) {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Persönliche Daten */}
             <div className="grid grid-cols-2 gap-4">
+              {/* Vorname */}
               <div>
                 <label className="text-sm font-medium">Vorname</label>
                 <Input
-                  required
-                  value={worker.first_name}
-                  onChange={e => setWorker({ ...worker, first_name: e.target.value })}
+                  value={formData.first_name}
+                  onChange={e => updateField('first_name', e.target.value)}
                   className="mt-1"
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                 />
+                {errors.first_name && (
+                  <p className="text-sm text-destructive mt-1">{errors.first_name}</p>
+                )}
               </div>
 
+              {/* Nachname */}
               <div>
                 <label className="text-sm font-medium">Nachname</label>
                 <Input
-                  required
-                  value={worker.last_name}
-                  onChange={e => setWorker({ ...worker, last_name: e.target.value })}
+                  value={formData.last_name}
+                  onChange={e => updateField('last_name', e.target.value)}
                   className="mt-1"
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                 />
+                {errors.last_name && (
+                  <p className="text-sm text-destructive mt-1">{errors.last_name}</p>
+                )}
               </div>
 
-              <div>
-                <label className="text-sm font-medium">Telefon</label>
-                <Input
-                  required
-                  type="tel"
-                  value={worker.phone}
-                  onChange={e => setWorker({ ...worker, phone: e.target.value })}
-                  className="mt-1"
-                  disabled={isSubmitting}
-                />
-              </div>
-
+              {/* Email */}
               <div>
                 <label className="text-sm font-medium">E-Mail</label>
                 <Input
                   type="email"
-                  value={worker.email}
-                  onChange={e => setWorker({ ...worker, email: e.target.value })}
+                  value={formData.email}
+                  onChange={e => updateField('email', e.target.value)}
                   className="mt-1"
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                 />
+                {errors.email && (
+                  <p className="text-sm text-destructive mt-1">{errors.email}</p>
+                )}
               </div>
 
+              {/* Telefon */}
+              <div>
+                <label className="text-sm font-medium">Telefon</label>
+                <Input
+                  type="tel"
+                  value={formData.phone}
+                  onChange={e => updateField('phone', e.target.value)}
+                  className="mt-1"
+                  disabled={isSaving}
+                />
+                {errors.phone && (
+                  <p className="text-sm text-destructive mt-1">{errors.phone}</p>
+                )}
+              </div>
+
+              {/* Stundensatz */}
               <div>
                 <label className="text-sm font-medium">Stundensatz (€)</label>
                 <Input
                   type="number"
-                  value={worker.hourly_rate}
-                  onChange={e => setWorker({ ...worker, hourly_rate: e.target.value })}
+                  value={formData.hourly_rate}
+                  onChange={e => updateField('hourly_rate', parseFloat(e.target.value))}
                   className="mt-1"
-                  disabled={isSubmitting}
                   min="0"
                   step="0.01"
+                  disabled={isSaving}
                 />
+                {errors.hourly_rate && (
+                  <p className="text-sm text-destructive mt-1">{errors.hourly_rate}</p>
+                )}
               </div>
-            </div>
 
-            {/* Fähigkeiten */}
-            <div>
-              <div className="flex justify-between items-center mb-4">
-                <label className="text-sm font-medium">Fähigkeiten</label>
-                <Button
-                  type="button"
-                  onClick={handleAddSkill}
-                  disabled={isSubmitting}
-                  className="flex items-center gap-2"
+              {/* Status */}
+              <div>
+                <label className="text-sm font-medium">Status</label>
+                <Select
+                  value={formData.active ? 'active' : 'inactive'}
+                  onValueChange={(value) => updateField('active', value === 'active')}
+                  disabled={isSaving}
                 >
-                  <Plus className="w-4 h-4" />
-                  Fähigkeit hinzufügen
-                </Button>
-              </div>
-
-              <div className="space-y-4">
-                {worker.skills.map((skill, index) => (
-                  <Card key={index}>
-                    <CardContent className="pt-4">
-                      <div className="flex items-end gap-4">
-                        <div className="flex-1">
-                          <label className="text-sm font-medium">Fähigkeit</label>
-                          <Select
-                            value={skill.id.toString()}
-                            onValueChange={(value) => updateSkill(index, 'id', value)}
-                          >
-                            <SelectTrigger className="mt-1">
-                              <SelectValue placeholder="Fähigkeit auswählen" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {availableSkills.map((availableSkill) => (
-                                <SelectItem 
-                                  key={availableSkill.id} 
-                                  value={availableSkill.id.toString()}
-                                >
-                                  {availableSkill.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="flex-1">
-                          <label className="text-sm font-medium">Erfahrung (Jahre)</label>
-                          <Input
-                            type="number"
-                            value={skill.experience_years}
-                            onChange={(e) => updateSkill(index, 'experience_years', parseInt(e.target.value))}
-                            className="mt-1"
-                            min="0"
-                            step="1"
-                          />
-                        </div>
-
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          onClick={() => handleRemoveSkill(index)}
-                          className="mb-1"
-                        >
-                          <X className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Status wählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Aktiv</SelectItem>
+                    <SelectItem value="inactive">Inaktiv</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </CardContent>
         </Card>
 
+        {/* Fähigkeiten */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Fähigkeiten</CardTitle>
+            <Button
+              type="button"
+              onClick={addSkill}
+              disabled={isSaving}
+              className="flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Fähigkeit hinzufügen
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {formData.skills.map((skill, index) => (
+                <div 
+                  key={index}
+                  className="flex items-end gap-4 p-4 bg-secondary/50 rounded-lg"
+                >
+                  <div className="flex-1">
+                    <label className="text-sm font-medium">Fähigkeit</label>
+                    <Select
+                      value={skill.id.toString()}
+                      onValueChange={(value) => updateSkill(index, 'id', parseInt(value))}
+                      disabled={isSaving}
+                    >
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder="Fähigkeit wählen" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableSkills.map((availableSkill) => (
+                          <SelectItem 
+                            key={availableSkill.id} 
+                            value={availableSkill.id.toString()}
+                          >
+                            {availableSkill.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="w-32">
+                    <label className="text-sm font-medium">Jahre Erfahrung</label>
+                    <Input
+                      type="number"
+                      value={skill.experience_years}
+                      onChange={(e) => updateSkill(index, 'experience_years', parseInt(e.target.value))}
+                      className="mt-1"
+                      min="0"
+                      disabled={isSaving}
+                    />
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => removeSkill(index)}
+                    disabled={isSaving}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              ))}
+
+              {errors.skills && (
+                <p className="text-sm text-destructive">{errors.skills}</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Form Buttons */}
-        <div className="flex gap-4">
+        <div className="flex justify-end gap-4">
           <Button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSaving}
           >
-            {isSubmitting ? 'Wird gespeichert...' : 'Speichern'}
+            {isSaving ? 'Wird gespeichert...' : 'Speichern'}
           </Button>
           <Button
             type="button"
             variant="outline"
-            onClick={() => navigate('/workers')}
-            disabled={isSubmitting}
+            onClick={handleCancel}
+            disabled={isSaving}
           >
             Abbrechen
           </Button>
@@ -4181,175 +5844,173 @@ export default function WorkerForm({ initialData }: WorkerFormProps) {
 # frontend/src/components/Mitarbeiter/WorkerList.tsx
 
 ```tsx
-// src/components/Handwerker/WorkerList.tsx
+// src/components/Mitarbeiter/WorkerList.tsx
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { 
   UserPlus, 
-  Pencil, 
-  Trash2,
-  Phone,
-  Mail,
-  Wrench
+  Users, 
+  Search, 
+  Wrench,
+  Filter
 } from 'lucide-react';
-
-interface Skill {
-  id: number;
-  name: string;
-  experience_years: number;
-}
-
-interface Worker {
-  id: number;
-  first_name: string;
-  last_name: string;
-  phone: string;
-  email: string;
-  hourly_rate: number;
-  skills: Skill[];
-  active: boolean;
-}
+import { Worker } from '@/types/worker';
+import { useAsync } from '@/hooks/useAsync';
+import { WorkerService } from '@/services/WorkerService';
+import { WorkerCard } from '@/components/Mitarbeiter/WorkerCard';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export default function WorkerList() {
-  const [workers, setWorkers] = useState<Worker[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isDeleting, setIsDeleting] = useState<number | null>(null);
   const navigate = useNavigate();
+  const [workers, setWorkers] = useState<Worker[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedSkill, setSelectedSkill] = useState<string>('all');
+  const [availableSkills, setAvailableSkills] = useState<Array<{ id: number; name: string }>>([]);
+
+  const { execute: fetchWorkers, isLoading, error } = useAsync<Worker[]>(
+    () => WorkerService.getAll(),
+    {
+      errorMessage: 'Fehler beim Laden der Handwerker'
+    }
+  );
+
+  const { execute: fetchSkills } = useAsync(
+    () => WorkerService.getSkills(),
+    {
+      errorMessage: 'Fehler beim Laden der Fähigkeiten'
+    }
+  );
 
   useEffect(() => {
     loadWorkers();
+    loadSkills();
   }, []);
 
   const loadWorkers = async () => {
     try {
-      const response = await fetch('http://localhost:3001/workers');
-      if (!response.ok) throw new Error('Laden fehlgeschlagen');
-      const data = await response.json();
+      const data = await fetchWorkers();
       setWorkers(data);
     } catch (error) {
       console.error('Fehler beim Laden:', error);
-    } finally {
-      setIsLoading(false);
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Möchten Sie diesen Handwerker wirklich deaktivieren?')) return;
-
-    setIsDeleting(id);
+  const loadSkills = async () => {
     try {
-      const response = await fetch(`http://localhost:3001/workers/${id}`, {
-        method: 'DELETE'
-      });
-
-      if (!response.ok) throw new Error('Löschen fehlgeschlagen');
-      await loadWorkers();
+      const skills = await fetchSkills();
+      setAvailableSkills(skills);
     } catch (error) {
-      console.error('Fehler beim Deaktivieren:', error);
-    } finally {
-      setIsDeleting(null);
+      console.error('Fehler beim Laden der Fähigkeiten:', error);
     }
   };
 
-  if (isLoading) return <div>Lade Handwerker...</div>;
+  const filteredWorkers = workers.filter(worker => {
+    const matchesSearch = (
+      worker.first_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      worker.last_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      worker.email.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    const matchesSkill = selectedSkill === 'all' || 
+      worker.skills.some(skill => skill.id.toString() === selectedSkill);
+
+    return matchesSearch && matchesSkill;
+  });
+
+  if (isLoading) {
+    return <LoadingState />;
+  }
+
+  if (error) {
+    return (
+      <ErrorState
+        title="Fehler beim Laden"
+        message={error.message}
+        onRetry={loadWorkers}
+      />
+    );
+  }
 
   return (
-    <div className="p-4 max-w-4xl mx-auto">
+    <div className="p-4 max-w-5xl mx-auto">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Handwerkerverwaltung</h1>
+        <div className="flex items-center gap-2">
+          <Wrench className="w-6 h-6" />
+          <h1 className="text-2xl font-bold">Handwerker</h1>
+        </div>
         <Button
-          className="flex items-center gap-2"
           onClick={() => navigate('/workers/new')}
+          className="flex items-center gap-2"
         >
           <UserPlus className="w-4 h-4" />
           Neuer Handwerker
         </Button>
       </div>
 
+      {/* Filter und Suche */}
+      <div className="grid gap-4 mb-6 md:grid-cols-2">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            placeholder="Handwerker suchen..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <div className="relative">
+          <Select 
+            value={selectedSkill}
+            onValueChange={setSelectedSkill}
+          >
+            <SelectTrigger className="w-full">
+              <Filter className="w-4 h-4 mr-2" />
+              <SelectValue placeholder="Nach Fähigkeit filtern" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Alle Fähigkeiten</SelectItem>
+              {availableSkills.map(skill => (
+                <SelectItem key={skill.id} value={skill.id.toString()}>
+                  {skill.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
       {workers.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <p className="text-muted-foreground mb-4">Keine Handwerker vorhanden</p>
-            <Button
-              onClick={() => navigate('/workers/new')}
-              className="flex items-center gap-2"
-            >
-              <UserPlus className="w-4 h-4" />
-              Ersten Handwerker hinzufügen
-            </Button>
-          </CardContent>
+        <EmptyState
+          title="Keine Handwerker vorhanden"
+          description="Fügen Sie Ihren ersten Handwerker hinzu"
+          icon={<Wrench className="w-12 h-12 text-muted-foreground" />}
+          action={{
+            label: 'Ersten Handwerker hinzufügen',
+            onClick: () => navigate('/workers/new')
+          }}
+        />
+      ) : filteredWorkers.length === 0 ? (
+        <Card className="p-6 text-center">
+          <p className="text-muted-foreground">
+            Keine Handwerker gefunden für Ihre Filterkriterien
+          </p>
         </Card>
       ) : (
         <div className="grid gap-4">
-          {workers.map(worker => (
-            <Card key={worker.id}>
-              <CardHeader>
-                <div className="flex justify-between items-start">
-                  <CardTitle className="text-xl">
-                    {worker.first_name} {worker.last_name}
-                  </CardTitle>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => navigate(`/workers/edit/${worker.id}`)}
-                      disabled={isDeleting === worker.id}
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleDelete(worker.id)}
-                      disabled={isDeleting === worker.id}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Kontaktinformationen */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Phone className="w-4 h-4 text-muted-foreground" />
-                      <span>{worker.phone}</span>
-                    </div>
-                    {worker.email && (
-                      <div className="flex items-center gap-2 text-sm">
-                        <Mail className="w-4 h-4 text-muted-foreground" />
-                        <span>{worker.email}</span>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2 text-sm">
-                      <span className="font-medium">Stundensatz:</span>
-                      <span>{worker.hourly_rate} €/h</span>
-                    </div>
-                  </div>
-
-                  {/* Fähigkeiten */}
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Wrench className="w-4 h-4 text-muted-foreground" />
-                      <span className="font-medium">Fähigkeiten:</span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {worker.skills?.map((skill, index) => (
-                        <span
-                          key={index}
-                          className="inline-flex items-center px-2 py-1 rounded-md bg-secondary text-secondary-foreground text-sm"
-                        >
-                          {skill.name} ({skill.experience_years} Jahre)
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+          {filteredWorkers.map(worker => (
+            <WorkerCard
+              key={worker.id}
+              worker={worker}
+              onEdit={() => navigate(`/workers/edit/${worker.id}`)}
+              onView={() => navigate(`/workers/${worker.id}`)}
+            />
           ))}
         </div>
       )}
@@ -4790,6 +6451,50 @@ export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent }
 
 ```
 
+# frontend/src/components/ui/EmptyState.tsx
+
+```tsx
+// src/components/ui/EmptyState.tsx
+import { PlusCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+
+
+
+interface EmptyStateProps {
+  title: string;
+  description?: string;
+  action?: {
+    label: string;
+    onClick: () => void;
+  };
+  icon?: React.ReactNode;
+}
+
+export function EmptyState({ title, description, action, icon }: EmptyStateProps) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center justify-center py-12">
+        {icon && <div className="mb-4">{icon}</div>}
+        <p className="text-lg font-medium mb-2">{title}</p>
+        {description && (
+          <p className="text-sm text-muted-foreground mb-4">{description}</p>
+        )}
+        {action && (
+          <Button
+            onClick={action.onClick}
+            className="flex items-center gap-2"
+          >
+            <PlusCircle className="w-4 h-4" />
+            {action.label}
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+```
+
 # frontend/src/components/ui/Error-Card.tsx
 
 ```tsx
@@ -4829,6 +6534,38 @@ export function ErrorCard({
 }
 ```
 
+# frontend/src/components/ui/ErrorState.tsx
+
+```tsx
+// src/components/ui/ErrorState.tsx
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { XCircle } from 'lucide-react';
+
+interface ErrorStateProps {
+  title: string;
+  message: string;
+  onRetry?: () => void;
+}
+
+export function ErrorState({ title, message, onRetry }: ErrorStateProps) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center justify-center py-12">
+        <XCircle className="w-12 h-12 text-destructive mb-4" />
+        <h3 className="text-lg font-semibold mb-2">{title}</h3>
+        <p className="text-muted-foreground mb-4">{message}</p>
+        {onRetry && (
+          <Button onClick={onRetry}>
+            Erneut versuchen
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+```
+
 # frontend/src/components/ui/input.tsx
 
 ```tsx
@@ -4855,6 +6592,19 @@ Input.displayName = "Input"
 
 export { Input }
 
+```
+
+# frontend/src/components/ui/LoadingState.tsx
+
+```tsx
+// src/components/ui/LoadingState.tsx
+export function LoadingState() {
+    return (
+      <div className="w-full h-48 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
+  }
 ```
 
 # frontend/src/components/ui/select.tsx
@@ -5010,11 +6760,11 @@ export function SkeletonCard() {
 # frontend/src/components/ui/Toast.tsx
 
 ```tsx
-// src/components/ui/toast.tsx
 import * as React from "react"
 import * as ToastPrimitives from "@radix-ui/react-toast"
 import { cva, type VariantProps } from "class-variance-authority"
 import { X } from "lucide-react"
+
 import { cn } from "@/lib/utils"
 
 const ToastProvider = ToastPrimitives.Provider
@@ -5035,11 +6785,11 @@ const ToastViewport = React.forwardRef<
 ToastViewport.displayName = ToastPrimitives.Viewport.displayName
 
 const toastVariants = cva(
-  "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-md border p-6 pr-8 shadow-lg transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full data-[state=open]:sm:slide-in-from-bottom-full",
+  "group pointer-events-auto relative flex w-full items-center justify-between space-x-2 overflow-hidden rounded-md border p-4 pr-6 shadow-lg transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full data-[state=open]:sm:slide-in-from-bottom-full",
   {
     variants: {
       variant: {
-        default: "border bg-background",
+        default: "border bg-background text-foreground",
         destructive:
           "destructive group border-destructive bg-destructive text-destructive-foreground",
       },
@@ -5072,7 +6822,7 @@ const ToastAction = React.forwardRef<
   <ToastPrimitives.Action
     ref={ref}
     className={cn(
-      "inline-flex h-8 shrink-0 items-center justify-center rounded-md border bg-transparent px-3 text-sm font-medium ring-offset-background transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 group-[.destructive]:border-muted/40 group-[.destructive]:hover:border-destructive/30 group-[.destructive]:hover:bg-destructive group-[.destructive]:hover:text-destructive-foreground group-[.destructive]:focus:ring-destructive",
+      "inline-flex h-8 shrink-0 items-center justify-center rounded-md border bg-transparent px-3 text-sm font-medium transition-colors hover:bg-secondary focus:outline-none focus:ring-1 focus:ring-ring disabled:pointer-events-none disabled:opacity-50 group-[.destructive]:border-muted/40 group-[.destructive]:hover:border-destructive/30 group-[.destructive]:hover:bg-destructive group-[.destructive]:hover:text-destructive-foreground group-[.destructive]:focus:ring-destructive",
       className
     )}
     {...props}
@@ -5087,7 +6837,7 @@ const ToastClose = React.forwardRef<
   <ToastPrimitives.Close
     ref={ref}
     className={cn(
-      "absolute right-2 top-2 rounded-md p-1 text-foreground/50 opacity-0 transition-opacity hover:text-foreground focus:opacity-100 focus:outline-none focus:ring-2 group-hover:opacity-100 group-[.destructive]:text-red-300 group-[.destructive]:hover:text-red-50 group-[.destructive]:focus:ring-red-400 group-[.destructive]:focus:ring-offset-red-600",
+      "absolute right-1 top-1 rounded-md p-1 text-foreground/50 opacity-0 transition-opacity hover:text-foreground focus:opacity-100 focus:outline-none focus:ring-1 group-hover:opacity-100 group-[.destructive]:text-red-300 group-[.destructive]:hover:text-red-50 group-[.destructive]:focus:ring-red-400 group-[.destructive]:focus:ring-offset-red-600",
       className
     )}
     toast-close=""
@@ -5104,7 +6854,7 @@ const ToastTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <ToastPrimitives.Title
     ref={ref}
-    className={cn("text-sm font-semibold", className)}
+    className={cn("text-sm font-semibold [&+div]:text-xs", className)}
     {...props}
   />
 ))
@@ -5137,12 +6887,13 @@ export {
   ToastClose,
   ToastAction,
 }
+
 ```
 
 # frontend/src/components/ui/Toaster.tsx
 
 ```tsx
-// src/components/ui/toaster.tsx
+import { useToast } from "@/hooks/useToast"
 import {
   Toast,
   ToastClose,
@@ -5151,7 +6902,6 @@ import {
   ToastTitle,
   ToastViewport,
 } from "@/components/ui/toast"
-import { useToast } from "@/hooks/use-toast"
 
 export function Toaster() {
   const { toasts } = useToast()
@@ -5176,6 +6926,7 @@ export function Toaster() {
     </ToastProvider>
   )
 }
+
 ```
 
 # frontend/src/constants/propertyTypes.ts
@@ -5205,44 +6956,77 @@ export const UNIT_STATUS = [
   'besetzt'
 ] as const;
 
-// TypeScript Typ-Definitionen
-export type PropertyType = typeof propertyTypes[number];
-export type UnitType = typeof UNIT_TYPES[number];
-export type UnitStatus = typeof UNIT_STATUS[number];
+// Status-Konfigurationen
+export const STATUS_CONFIG = {
+  verfügbar: {
+    label: 'Verfügbar',
+    color: 'green',
+  },
+  besetzt: {
+    label: 'Besetzt',
+    color: 'blue',
+  }
+} as const;
 
-// Interface für Property
-export interface Property {
-  id?: number;
-  address: string;
-  property_type: PropertyType;
-  total_rent: number; 
-  units: Unit[];
-}
+// Document Categories
+export const DOCUMENT_CATEGORIES = [
+  'Mietvertrag',
+  'Nebenkostenabrechnung',
+  'Wartungsvertrag',
+  'Versicherung',
+  'Sonstiges'
+] as const;
 
-// Interface für Unit
-export interface Unit {
-  id?: number;
-  name: string;
-  type: UnitType;
-  size: number | '';
-  status: UnitStatus;
-  rent?: number | '';
-}
+// Document Types
+export const DOCUMENT_TYPES = {
+  pdf: {
+    icon: 'FileText',
+    color: 'red',
+  },
+  doc: {
+    icon: 'FileText',
+    color: 'blue',
+  },
+  image: {
+    icon: 'Image',
+    color: 'green',
+  }
+} as const;
 
-// Interface für API-Antworten
-export interface ApiResponse<T> {
-  data?: T;
-  error?: string;
-}
+// API Configuration
+export const API_CONFIG = {
+  baseUrl: 'http://localhost:3001',
+  timeout: 5000,
+  retryAttempts: 3,
+} as const;
+
+// Table Configuration
+export const TABLE_CONFIG = {
+  defaultPageSize: 10,
+  pageSizeOptions: [5, 10, 20, 50],
+} as const;
+
+// Form Configuration
+export const FORM_CONFIG = {
+  maxFileSize: 10 * 1024 * 1024, // 10MB
+  allowedFileTypes: ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'],
+} as const;
+
+// Validation Configuration
+export const VALIDATION_CONFIG = {
+  minPasswordLength: 8,
+  maxNameLength: 100,
+  phonePattern: /^[+]?[(]?[0-9]{3}[)]?[-\s.]?[0-9]{3}[-\s.]?[0-9]{4,6}$/,
+  emailPattern: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+} as const;
 ```
 
 # frontend/src/hooks/use-toast.ts
 
 ```ts
-// src/hooks/use-toast.ts
+// src/hooks/useToast.ts
 import * as React from "react"
-
-import type {
+import {
   ToastActionElement,
   ToastProps,
 } from "@/components/ui/toast"
@@ -5378,9 +7162,7 @@ function dispatch(action: Action) {
   })
 }
 
-type Toast = Omit<ToasterToast, "id">
-
-function toast({ ...props }: Toast) {
+function toast({ ...props }: Partial<ToasterToast>) {
   const id = genId()
 
   const update = (props: ToasterToast) =>
@@ -5389,6 +7171,7 @@ function toast({ ...props }: Toast) {
       id,
       toast: props,
     })
+
   const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
 
   dispatch({
@@ -5410,7 +7193,7 @@ function toast({ ...props }: Toast) {
   }
 }
 
-function useToast() {
+export function useToast() {
   const [state, setState] = React.useState<State>(memoryState)
 
   React.useEffect(() => {
@@ -5448,8 +7231,449 @@ function useToast() {
     dismiss: (toastId?: string) => dispatch({ type: "DISMISS_TOAST", toastId }),
   }
 }
+```
 
-export { useToast, toast }
+# frontend/src/hooks/useAsync.ts
+
+```ts
+// src/hooks/useAsync.ts
+import { useState, useCallback, useRef } from 'react';
+import { useToast } from './useToast';
+import { ApiError } from '@/types/common';
+
+interface UseAsyncOptions {
+  successMessage?: string;
+  errorMessage?: string;
+  showSuccessToast?: boolean;
+  showErrorToast?: boolean;
+  retryCount?: number;
+  autoExecute?: boolean;
+}
+
+export function useAsync<T>(
+  asyncFunction: (...args: any[]) => Promise<T>,
+  options: UseAsyncOptions = {}
+) {
+  const [isLoading, setIsLoading] = useState(options.autoExecute === true);
+  const [error, setError] = useState<Error | null>(null);
+  const [data, setData] = useState<T | null>(null);
+  const { toast } = useToast();
+  
+  // Verwenden von useRef für die aktuelle Operation, um Race-Conditions zu vermeiden
+  const activeRequest = useRef<AbortController | null>(null);
+  
+  const execute = useCallback(
+    async (...args: any[]): Promise<T> => {
+      // Abbrechen einer bereits laufenden Operation
+      if (activeRequest.current) {
+        activeRequest.current.abort();
+      }
+      
+      // Neue AbortController für diese Operation
+      const controller = new AbortController();
+      activeRequest.current = controller;
+      
+      try {
+        setIsLoading(true);
+        setError(null);
+        
+        const response = await asyncFunction(...args);
+        
+        // Nur wenn diese Operation nicht abgebrochen wurde, Daten setzen
+        if (!controller.signal.aborted) {
+          setData(response);
+          
+          if (options.showSuccessToast !== false && options.successMessage) {
+            toast({
+              title: 'Erfolg',
+              description: options.successMessage,
+              duration: 3000,
+            });
+          }
+        }
+        
+        return response;
+      } catch (err) {
+        // Nur wenn diese Operation nicht abgebrochen wurde, Fehler setzen
+        if (!controller.signal.aborted) {
+          console.error('Fehler in useAsync:', err);
+          
+          const error = err instanceof Error ? err : new Error('Ein Fehler ist aufgetreten');
+          setError(error);
+          
+          if (options.showErrorToast !== false) {
+            const errorMessage = err instanceof ApiError 
+              ? err.message 
+              : options.errorMessage || 'Ein unerwarteter Fehler ist aufgetreten';
+            
+            toast({
+              title: 'Fehler',
+              description: errorMessage,
+              variant: 'destructive',
+              duration: 5000,
+            });
+          }
+        }
+        
+        throw err;
+      } finally {
+        // Nur wenn diese Operation nicht abgebrochen wurde, isLoading zurücksetzen
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+          activeRequest.current = null;
+        }
+      }
+    },
+    [asyncFunction, options, toast]
+  );
+
+  // Auto-execute if the option is enabled
+  const didAutoExecute = useRef(false);
+  if (options.autoExecute && !didAutoExecute.current && !isLoading && !data && !error) {
+    didAutoExecute.current = true;
+    execute();
+  }
+
+  const reset = useCallback(() => {
+    setData(null);
+    setError(null);
+    setIsLoading(false);
+  }, []);
+
+  const retry = useCallback(async (...args: any[]) => {
+    if (isLoading) return;
+    return execute(...args);
+  }, [execute, isLoading]);
+
+  return {
+    execute,
+    isLoading,
+    error,
+    data,
+    reset,
+    retry
+  };
+}
+```
+
+# frontend/src/hooks/useConfirmation.ts
+
+```ts
+// src/hooks/useConfirmation.ts
+import { useState, useCallback } from 'react';
+
+interface UseConfirmationOptions {
+  title?: string;
+  message?: string;
+  confirmText?: string;
+  cancelText?: string;
+}
+
+export function useConfirmation(options: UseConfirmationOptions = {}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [resolveRef, setResolveRef] = useState<((value: boolean) => void) | null>(null);
+
+  const confirm = useCallback(() => {
+    return new Promise<boolean>((resolve) => {
+      setIsOpen(true);
+      setResolveRef(() => resolve);
+    });
+  }, []);
+
+  const handleConfirm = useCallback(() => {
+    if (resolveRef) {
+      resolveRef(true);
+      setIsOpen(false);
+      setResolveRef(null);
+    }
+  }, [resolveRef]);
+
+  const handleCancel = useCallback(() => {
+    if (resolveRef) {
+      resolveRef(false);
+      setIsOpen(false);
+      setResolveRef(null);
+    }
+  }, [resolveRef]);
+
+  return {
+    isOpen,
+    confirm,
+    handleConfirm,
+    handleCancel,
+    options,
+  };
+}
+```
+
+# frontend/src/hooks/useFormState.ts
+
+```ts
+// src/hooks/useFormState.ts
+import { useState, useCallback } from 'react';
+
+export function useFormState<T>(initialState: T) {
+  const [formData, setFormData] = useState<T>(initialState);
+  const [errors, setErrors] = useState<Partial<Record<keyof T, string>>>({});
+  const [isDirty, setIsDirty] = useState(false);
+
+  const updateField = useCallback(<K extends keyof T>(
+    field: K,
+    value: T[K]
+  ) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value,
+    }));
+    setIsDirty(true);
+    // Lösche Fehler wenn Feld aktualisiert wird
+    setErrors(prev => ({
+      ...prev,
+      [field]: undefined,
+    }));
+  }, []);
+
+  const validateField = useCallback((
+    field: keyof T,
+    validator: (value: T[typeof field]) => string | undefined
+  ) => {
+    const error = validator(formData[field]);
+    setErrors(prev => ({
+      ...prev,
+      [field]: error,
+    }));
+    return !error;
+  }, [formData]);
+
+  const resetForm = useCallback(() => {
+    setFormData(initialState);
+    setErrors({});
+    setIsDirty(false);
+  }, [initialState]);
+
+  return {
+    formData,
+    setFormData,
+    errors,
+    setErrors,
+    isDirty,
+    updateField,
+    validateField,
+    resetForm,
+  };
+}
+```
+
+# frontend/src/hooks/useToast.ts
+
+```ts
+// src/hooks/useToast.ts
+import * as React from "react"
+import {
+  ToastActionElement,
+  ToastProps,
+} from "@/components/ui/toast"
+
+const TOAST_LIMIT = 1
+const TOAST_REMOVE_DELAY = 3000
+
+type ToasterToast = ToastProps & {
+  id: string
+  title?: React.ReactNode
+  description?: React.ReactNode
+  action?: ToastActionElement
+}
+
+const actionTypes = {
+  ADD_TOAST: "ADD_TOAST",
+  UPDATE_TOAST: "UPDATE_TOAST",
+  DISMISS_TOAST: "DISMISS_TOAST",
+  REMOVE_TOAST: "REMOVE_TOAST",
+} as const
+
+let count = 0
+
+function genId() {
+  count = (count + 1) % Number.MAX_VALUE
+  return count.toString()
+}
+
+type ActionType = typeof actionTypes
+
+type Action =
+  | {
+      type: ActionType["ADD_TOAST"]
+      toast: ToasterToast
+    }
+  | {
+      type: ActionType["UPDATE_TOAST"]
+      toast: Partial<ToasterToast>
+      id: string
+    }
+  | {
+      type: ActionType["DISMISS_TOAST"]
+      toastId?: string
+    }
+  | {
+      type: ActionType["REMOVE_TOAST"]
+      toastId?: string
+    }
+
+interface State {
+  toasts: ToasterToast[]
+}
+
+const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+
+const addToRemoveQueue = (toastId: string) => {
+  if (toastTimeouts.has(toastId)) {
+    return
+  }
+
+  const timeout = setTimeout(() => {
+    toastTimeouts.delete(toastId)
+    dispatch({
+      type: "REMOVE_TOAST",
+      toastId: toastId,
+    })
+  }, TOAST_REMOVE_DELAY)
+
+  toastTimeouts.set(toastId, timeout)
+}
+
+export const reducer = (state: State, action: Action): State => {
+  switch (action.type) {
+    case "ADD_TOAST":
+      return {
+        ...state,
+        toasts: [action.toast, ...state.toasts].slice(0, TOAST_LIMIT),
+      }
+
+    case "UPDATE_TOAST":
+      return {
+        ...state,
+        toasts: state.toasts.map((t) =>
+          t.id === action.id ? { ...t, ...action.toast } : t
+        ),
+      }
+
+    case "DISMISS_TOAST": {
+      const { toastId } = action
+
+      if (toastId) {
+        addToRemoveQueue(toastId)
+      } else {
+        state.toasts.forEach((toast) => {
+          addToRemoveQueue(toast.id)
+        })
+      }
+
+      return {
+        ...state,
+        toasts: state.toasts.map((t) =>
+          t.id === toastId || toastId === undefined
+            ? {
+                ...t,
+                open: false,
+              }
+            : t
+        ),
+      }
+    }
+    case "REMOVE_TOAST":
+      if (action.toastId === undefined) {
+        return {
+          ...state,
+          toasts: [],
+        }
+      }
+      return {
+        ...state,
+        toasts: state.toasts.filter((t) => t.id !== action.toastId),
+      }
+  }
+}
+
+const listeners: Array<(state: State) => void> = []
+
+let memoryState: State = { toasts: [] }
+
+function dispatch(action: Action) {
+  memoryState = reducer(memoryState, action)
+  listeners.forEach((listener) => {
+    listener(memoryState)
+  })
+}
+
+function toast({ ...props }: Partial<ToasterToast>) {
+  const id = genId()
+
+  const update = (props: ToasterToast) =>
+    dispatch({
+      type: "UPDATE_TOAST",
+      id,
+      toast: props,
+    })
+
+  const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
+
+  dispatch({
+    type: "ADD_TOAST",
+    toast: {
+      ...props,
+      id,
+      open: true,
+      onOpenChange: (open) => {
+        if (!open) dismiss()
+      },
+    },
+  })
+
+  return {
+    id: id,
+    dismiss,
+    update,
+  }
+}
+
+export function useToast() {
+  const [state, setState] = React.useState<State>(memoryState)
+
+  React.useEffect(() => {
+    listeners.push(setState)
+    return () => {
+      const index = listeners.indexOf(setState)
+      if (index > -1) {
+        listeners.splice(index, 1)
+      }
+    }
+  }, [state])
+
+  const showSuccessToast = (title: string, description?: string) => {
+    toast({
+      title,
+      description,
+      duration: 2000,
+    })
+  }
+
+  const showErrorToast = (title: string, description?: string) => {
+    toast({
+      title,
+      description,
+      variant: "destructive",
+      duration: 4000,
+    })
+  }
+
+  return {
+    ...state,
+    toast,
+    showSuccessToast,
+    showErrorToast,
+    dismiss: (toastId?: string) => dispatch({ type: "DISMISS_TOAST", toastId }),
+  }
+}
 ```
 
 # frontend/src/index.css
@@ -5460,8 +7684,6 @@ export { useToast, toast }
 @tailwind utilities;
 
 @layer base {
-
-
   :root {
     --background: 0 0% 100%;
     --foreground: 0 0% 3.9%;
@@ -5516,6 +7738,7 @@ export { useToast, toast }
     --chart-5: 340 75% 55%
   }
 }
+
 @layer base {
   * {
     @apply border-border;
@@ -5524,35 +7747,274 @@ export { useToast, toast }
     @apply bg-background text-foreground;
   }
 }
-
 ```
 
 # frontend/src/lib/downloads.ts
 
 ```ts
-// src/lib/utils/download.ts
+// src/lib/downloads.ts
 export function downloadFile(blob: Blob, filename: string) {
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
-  }
+  const url = window.URL.createObjectURL(blob);
+  const link = window.document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  window.document.body.appendChild(link);
+  link.click();
+  window.document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+```
+
+# frontend/src/lib/formatters.ts
+
+```ts
+// src/lib/formatters.ts
+export const formatCurrency = (value: number): string => {
+    return new Intl.NumberFormat('de-DE', {
+      style: 'currency',
+      currency: 'EUR',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(value);
+  };
+  
+  export const formatDate = (date: string | Date): string => {
+    const dateObj = typeof date === 'string' ? new Date(date) : date;
+    
+    return new Intl.DateTimeFormat('de-DE', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(dateObj);
+  };
+  
+  export const formatDateTime = (date: string | Date): string => {
+    const dateObj = typeof date === 'string' ? new Date(date) : date;
+    
+    return new Intl.DateTimeFormat('de-DE', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(dateObj);
+  };
+  
+  export const formatPhoneNumber = (phoneNumber: string): string => {
+    // Entferne alle nicht-numerischen Zeichen
+    const cleaned = phoneNumber.replace(/\D/g, '');
+    
+    // Formatiere je nach Länge
+    if (cleaned.length === 10) {
+      return cleaned.replace(/(\d{3})(\d{3})(\d{4})/, '($1) $2-$3');
+    } else if (cleaned.length === 11) {
+      return cleaned.replace(/(\d{1})(\d{3})(\d{3})(\d{4})/, '+$1 ($2) $3-$4');
+    }
+    
+    // Fallback: Gib die originale Nummer zurück
+    return phoneNumber;
+  };
+  
+  export const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+  };
+  
+  export const formatPercentage = (value: number): string => {
+    return new Intl.NumberFormat('de-DE', {
+      style: 'percent',
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1
+    }).format(value / 100);
+  };
+  
+  export const formatNumber = (value: number): string => {
+    return new Intl.NumberFormat('de-DE').format(value);
+  };
+  
+  export const formatAddress = (
+    street: string,
+    number: string,
+    zip: string,
+    city: string
+  ): string => {
+    return `${street} ${number}, ${zip} ${city}`;
+  };
+  
+  export const formatName = (firstName: string, lastName: string): string => {
+    return `${firstName} ${lastName}`;
+  };
+  
+  export const formatDuration = (minutes: number): string => {
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    
+    if (hours === 0) {
+      return `${remainingMinutes} Min.`;
+    }
+    
+    return `${hours} Std. ${remainingMinutes} Min.`;
+  };
 ```
 
 # frontend/src/lib/utils.ts
 
 ```ts
 // src/lib/utils.ts
-import { clsx, type ClassValue } from "clsx"
-import { twMerge } from "tailwind-merge"
+import { type ClassValue, clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
 
+// Utility für Tailwind CSS Klassen-Kombinationen
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
+  return twMerge(clsx(inputs));
 }
+
+// Generische Error Handler
+export function isApiError(error: unknown): error is Error {
+  return error instanceof Error;
+}
+
+// Allgemeine Dateiverarbeitung
+export function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+}
+
+// Debounce Funktion für Suchfelder etc.
+export function debounce<T extends (...args: any[]) => void>(
+  func: T,
+  wait: number
+): (...args: Parameters<T>) => void {
+  let timeout: NodeJS.Timeout;
+  
+  return function executedFunction(...args: Parameters<T>) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
+
+// Array Utilities
+export function groupBy<T>(array: T[], key: keyof T): Record<string, T[]> {
+  return array.reduce((groups, item) => {
+    const value = item[key];
+    const keyString = String(value);
+    groups[keyString] = groups[keyString] ?? [];
+    groups[keyString].push(item);
+    return groups;
+  }, {} as Record<string, T[]>);
+}
+```
+
+# frontend/src/lib/validators.ts
+
+```ts
+// src/lib/validators.ts
+import { VALIDATION_CONFIG } from '@/constants/propertyTypes';
+
+export const required = (value: any): string | undefined => {
+  if (value === undefined || value === null || value === '') {
+    return 'Dieses Feld ist erforderlich';
+  }
+  return undefined;
+};
+
+export const email = (value: string): string | undefined => {
+  if (!value) return undefined;
+  
+  if (!VALIDATION_CONFIG.emailPattern.test(value)) {
+    return 'Bitte geben Sie eine gültige E-Mail-Adresse ein';
+  }
+  return undefined;
+};
+
+export const phone = (value: string): string | undefined => {
+  if (!value) return undefined;
+
+  if (!VALIDATION_CONFIG.phonePattern.test(value)) {
+    return 'Bitte geben Sie eine gültige Telefonnummer ein';
+  }
+  return undefined;
+};
+
+export const minLength = (min: number) => (value: string): string | undefined => {
+  if (!value) return undefined;
+
+  if (value.length < min) {
+    return `Mindestens ${min} Zeichen erforderlich`;
+  }
+  return undefined;
+};
+
+export const maxLength = (max: number) => (value: string): string | undefined => {
+  if (!value) return undefined;
+
+  if (value.length > max) {
+    return `Maximal ${max} Zeichen erlaubt`;
+  }
+  return undefined;
+};
+
+export const number = (value: string): string | undefined => {
+  if (!value) return undefined;
+
+  if (isNaN(Number(value))) {
+    return 'Bitte geben Sie eine gültige Zahl ein';
+  }
+  return undefined;
+};
+
+export const positiveNumber = (value: number): string | undefined => {
+  if (value === undefined || value === null) return undefined;
+
+  if (value <= 0) {
+    return 'Der Wert muss größer als 0 sein';
+  }
+  return undefined;
+};
+
+export const dateNotInPast = (value: string): string | undefined => {
+  if (!value) return undefined;
+
+  const date = new Date(value);
+  const now = new Date();
+  
+  if (date < now) {
+    return 'Das Datum darf nicht in der Vergangenheit liegen';
+  }
+  return undefined;
+};
+
+export const dateNotInFuture = (value: string): string | undefined => {
+  if (!value) return undefined;
+
+  const date = new Date(value);
+  const now = new Date();
+  
+  if (date > now) {
+    return 'Das Datum darf nicht in der Zukunft liegen';
+  }
+  return undefined;
+};
+
+export const composeValidators = (...validators: ((value: any) => string | undefined)[]) => 
+  (value: any): string | undefined => 
+    validators.reduce(
+      (error, validator) => error || validator(value),
+      undefined as string | undefined
+    );
 ```
 
 # frontend/src/main.tsx
@@ -5571,42 +8033,444 @@ createRoot(document.getElementById('root')!).render(
 
 ```
 
+# frontend/src/services/api.ts
+
+```ts
+// src/services/api.ts
+import { API_CONFIG } from '@/constants/propertyTypes';
+import { ApiError } from '@/types/common';
+
+export class API {
+  private static baseUrl = API_CONFIG.baseUrl;
+  private static timeout = API_CONFIG.timeout;
+
+  private static async request<T>(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<T> {
+    const url = `${this.baseUrl}${endpoint}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        let errorMessage = 'Ein Fehler ist aufgetreten';
+        let errorData;
+        
+        try {
+          errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch {
+          // Falls keine JSON-Antwort verfügbar ist
+        }
+
+        throw new ApiError(errorMessage, response.status, errorData);
+      }
+
+      // For endpoints that return no content
+      if (response.status === 204) {
+        return {} as T;
+      }
+
+      return response.json();
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof ApiError) throw error;
+      
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new ApiError('Die Anfrage wurde wegen Zeitüberschreitung abgebrochen', 408);
+        }
+        throw new ApiError(error.message);
+      }
+      
+      throw new ApiError('Ein unerwarteter Fehler ist aufgetreten');
+    }
+  }
+
+  static get<T>(endpoint: string): Promise<T> {
+    return this.request<T>(endpoint);
+  }
+
+  static post<T>(endpoint: string, data: any): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  static put<T>(endpoint: string, data: any): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  static delete(endpoint: string): Promise<void> {
+    return this.request(endpoint, {
+      method: 'DELETE',
+    });
+  }
+}
+```
+
+# frontend/src/services/DocumentService.ts
+
+```ts
+// src/services/DocumentService.ts
+import { API } from './api';
+import { API_CONFIG } from '@/constants/propertyTypes';
+import { Document, DocumentUploadData } from '@/types/document';
+import { ApiError } from '@/types/common';
+
+export class DocumentService {
+  private static endpoint = '/documents';
+
+  static async getAll(filters?: {
+    tenantId?: number;
+    categoryId?: number;
+    isConfidential?: boolean;
+    tags?: string[];
+  }): Promise<Document[]> {
+    const queryParams = new URLSearchParams();
+    if (filters) {
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value !== undefined) {
+          queryParams.append(key, String(value));
+        }
+      });
+    }
+    const queryString = queryParams.toString();
+    const url = queryString ? `${this.endpoint}?${queryString}` : this.endpoint;
+    return API.get<Document[]>(url);
+  }
+
+  static async getById(id: number): Promise<Document> {
+    return API.get<Document>(`${this.endpoint}/${id}`);
+  }
+
+  static async upload(data: DocumentUploadData): Promise<Document> {
+    const formData = new FormData();
+    Object.entries(data).forEach(([key, value]) => {
+      if (value !== undefined) {
+        if (key === 'tags' && Array.isArray(value)) {
+          formData.append(key, JSON.stringify(value));
+        } else {
+          formData.append(key, value as string | Blob);
+        }
+      }
+    });
+
+    const response = await fetch(`${API_CONFIG.baseUrl}/documents`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Upload fehlgeschlagen' }));
+      throw new ApiError(error.error || 'Upload fehlgeschlagen', response.status);
+    }
+    
+    return response.json();
+  }
+
+  static async delete(id: number): Promise<void> {
+    return API.delete(`${this.endpoint}/${id}`);
+  }
+
+  static getDownloadUrl(id: number): string {
+    return `${API_CONFIG.baseUrl}${this.endpoint}/${id}/download`;
+  }
+
+  static async getPreview(id: number): Promise<Blob> {
+    const response = await fetch(`${API_CONFIG.baseUrl}${this.endpoint}/${id}/preview`);
+    if (!response.ok) {
+      throw new ApiError('Vorschau konnte nicht geladen werden', response.status);
+    }
+    return await response.blob();
+  }
+
+  static async getCategories(): Promise<any[]> {
+    return API.get<any[]>(`${this.endpoint}/categories`);
+  }
+}
+```
+
+# frontend/src/services/PropertyService.ts
+
+```ts
+// src/services/PropertyService.ts
+import { API } from './api';
+import { Property, PropertyFormData } from '@/types/property';
+
+export class PropertyService {
+  private static endpoint = '/properties';
+
+  static async getAll(): Promise<Property[]> {
+    return API.get<Property[]>(this.endpoint);
+  }
+
+  static async getById(id: number): Promise<Property> {
+    return API.get<Property>(`${this.endpoint}/${id}`);
+  }
+
+  static async create(data: PropertyFormData): Promise<Property> {
+    return API.post<Property>(this.endpoint, data);
+  }
+
+  static async update(id: number, data: PropertyFormData): Promise<Property> {
+    return API.put<Property>(`${this.endpoint}/${id}`, data);
+  }
+
+  static async delete(id: number): Promise<void> {
+    return API.delete(`${this.endpoint}/${id}`);
+  }
+}
+
+```
+
+# frontend/src/services/TenantService.ts
+
+```ts
+// src/services/TenantService.ts
+import { API } from './api';
+import { Tenant, TenantFormData } from '@/types/tenant';
+
+export class TenantService {
+  private static endpoint = '/tenants';
+
+  static async getAll(): Promise<Tenant[]> {
+    return API.get<Tenant[]>(this.endpoint);
+  }
+
+  static async getById(id: number): Promise<Tenant> {
+    return API.get<Tenant>(`${this.endpoint}/${id}`);
+  }
+
+  static async create(data: TenantFormData): Promise<Tenant> {
+    return API.post<Tenant>(this.endpoint, data);
+  }
+
+  static async update(id: number, data: TenantFormData): Promise<Tenant> {
+    return API.put<Tenant>(`${this.endpoint}/${id}`, data);
+  }
+
+  static async delete(id: number): Promise<void> {
+    return API.delete(`${this.endpoint}/${id}`);
+  }
+}
+```
+
+# frontend/src/services/WorkerService.ts
+
+```ts
+// src/services/WorkerService.ts
+import { API } from './api';
+import { Worker, WorkerFormData } from '@/types/worker';
+
+export class WorkerService {
+  private static endpoint = '/workers';
+
+  static async getAll(): Promise<Worker[]> {
+    return API.get<Worker[]>(this.endpoint);
+  }
+
+  static async getById(id: number): Promise<Worker> {
+    return API.get<Worker>(`${this.endpoint}/${id}`);
+  }
+
+  static async create(data: WorkerFormData): Promise<Worker> {
+    return API.post<Worker>(this.endpoint, data);
+  }
+
+  static async update(id: number, data: WorkerFormData): Promise<Worker> {
+    return API.put<Worker>(`${this.endpoint}/${id}`, data);
+  }
+
+  static async delete(id: number): Promise<void> {
+    return API.delete(`${this.endpoint}/${id}`);
+  }
+
+  static async getSkills(): Promise<any[]> {
+    return API.get<any[]>(`${this.endpoint}/skills`);
+  }
+}
+```
+
+# frontend/src/types/common.ts
+
+```ts
+// src/types/common.ts
+
+export class ApiError extends Error {
+  status: number;
+  data?: any;
+
+  constructor(message: string, status: number = 500, data?: any) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.data = data;
+  }
+}
+
+export type PaginatedResponse<T> = {
+  data: T[];
+  total: number;
+  page: number;
+  perPage: number;
+  totalPages: number;
+};
+
+export type ApiResponse<T> = {
+  data: T;
+  message?: string;
+  status: number;
+};
+
+export type ApiErrorType = {
+  message: string;
+  code?: string;
+  details?: Record<string, any>;
+  status?: number;
+  field?: string;
+};
+
+export type BaseEntity = {
+  id: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SelectOption = {
+  label: string;
+  value: string | number;
+  disabled?: boolean;
+};
+
+export type FormField = {
+  name: string;
+  label: string;
+  type: 'text' | 'number' | 'email' | 'password' | 'select' | 'date' | 'textarea';
+  required?: boolean;
+  placeholder?: string;
+  options?: SelectOption[];
+  validation?: {
+    min?: number;
+    max?: number;
+    minLength?: number;
+    maxLength?: number;
+    pattern?: RegExp;
+    customValidation?: (value: any) => string | undefined;
+  };
+};
+```
+
+# frontend/src/types/document.ts
+
+```ts
+// src/types/document.ts
+import { BaseEntity } from './common';
+
+export interface Document extends BaseEntity {
+  filename: string;
+  original_filename: string;
+  mime_type: string;
+  file_size: number;
+  category_id: number;
+  category_name: string;
+  tenant_id?: number;
+  tenant?: {
+    id: number;
+    first_name: string;
+    last_name: string;
+  };
+  description?: string;
+  is_confidential: boolean;
+  tags: string[];
+  upload_date: string;
+  created_by: string;
+  file_path?: string;
+  content?: Uint8Array;
+}
+
+export interface DocumentUploadData {
+  file: File;
+  categoryId: number;
+  tenantId?: number;
+  description?: string;
+  isConfidential: boolean;
+  tags?: string[];
+}
+```
+
 # frontend/src/types/property.ts
 
 ```ts
-// types/property.ts
+// src/types/property.ts
+import { BaseEntity } from './common';
 
-export interface Property {
-  id?: number;
+export interface Property extends BaseEntity {
   address: string;
-  size: number;
-  price: number;
   property_type: string;
-  total_rent: number; 
+  total_rent: number;
   units: Unit[];
 }
 
-export interface Unit {
-  id?: number;
+export interface Unit extends BaseEntity {
+  property_id: number;
   name: string;
   type: string;
   size: number;
-  status: string;
-  rent: number;
+  status: 'verfügbar' | 'besetzt';
+  rent?: number;
 }
 
 export interface PropertyFormData {
   address: string;
-  size: number | string;
-  price: number | string;
-  status: string;
   property_type: string;
-  units?: Unit[];
+  units: Omit<Unit, 'id' | 'property_id' | 'created_at' | 'updated_at'>[];
+}
+```
+
+# frontend/src/types/tenant.ts
+
+```ts
+// src/types/tenant.ts
+import { BaseEntity } from './common';
+
+export interface Tenant extends BaseEntity {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  address: string;
+  unit_id?: number;
+  rent_start_date: string;
+  rent_end_date?: string;
+  active: boolean;
 }
 
-export interface ApiResponse<T> {
-  data?: T;
-  error?: string;
+export interface TenantFormData {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  address: string;
+  unit_id?: number | null;
+  rent_start_date: string;
+  rent_end_date?: string | null;
 }
 ```
 
@@ -5614,38 +8478,38 @@ export interface ApiResponse<T> {
 
 ```ts
 // src/types/worker.ts
+import { BaseEntity } from './common';
+
+export interface Worker extends BaseEntity {
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+  hourly_rate: number;
+  skills: WorkerSkill[];
+  active: boolean;
+}
 
 export interface Skill {
-    id: number;
-    name: string;
-    description?: string;
+  id: number;
+  name: string;
+  description?: string;
 }
 
 export interface WorkerSkill {
-    id: number;
-    name?: string;
-    experience_years: number;
-}
-
-export interface Worker {
-    id?: number;
-    first_name: string;
-    last_name: string;
-    phone: string;
-    email: string;
-    hourly_rate: number | string;
-    skills: WorkerSkill[];
-    active?: boolean;
+  id: number;
+  name?: string;
+  experience_years: number;
 }
 
 export interface WorkerFormData {
-    first_name: string;
-    last_name: string;
-    phone: string;
-    email: string;
-    hourly_rate: number | string;
-    skills: WorkerSkill[];
-    active?: boolean;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+  hourly_rate: number | string;
+  skills: WorkerSkill[];
+  active?: boolean;
 }
 ```
 
@@ -5659,7 +8523,6 @@ export interface WorkerFormData {
 # frontend/tailwind.config.js
 
 ```js
-// tailwind.config.js
 /** @type {import('tailwindcss').Config} */
 export default {
 	darkMode: ["class"],
@@ -5668,11 +8531,53 @@ export default {
 	  "./src/**/*.{js,ts,jsx,tsx}",
 	],
 	theme: {
+	  container: {
+		center: true,
+		padding: "2rem",
+		screens: {
+		  "2xl": "1400px",
+		},
+	  },
 	  extend: {
+		colors: {
+		  border: "hsl(var(--border))",
+		  input: "hsl(var(--input))",
+		  ring: "hsl(var(--ring))",
+		  background: "hsl(var(--background))",
+		  foreground: "hsl(var(--foreground))",
+		  primary: {
+			DEFAULT: "hsl(var(--primary))",
+			foreground: "hsl(var(--primary-foreground))",
+		  },
+		  secondary: {
+			DEFAULT: "hsl(var(--secondary))",
+			foreground: "hsl(var(--secondary-foreground))",
+		  },
+		  destructive: {
+			DEFAULT: "hsl(var(--destructive))",
+			foreground: "hsl(var(--destructive-foreground))",
+		  },
+		  muted: {
+			DEFAULT: "hsl(var(--muted))",
+			foreground: "hsl(var(--muted-foreground))",
+		  },
+		  accent: {
+			DEFAULT: "hsl(var(--accent))",
+			foreground: "hsl(var(--accent-foreground))",
+		  },
+		  popover: {
+			DEFAULT: "hsl(var(--popover))",
+			foreground: "hsl(var(--popover-foreground))",
+		  },
+		  card: {
+			DEFAULT: "hsl(var(--card))",
+			foreground: "hsl(var(--card-foreground))",
+		  },
+		},
 		borderRadius: {
-		  lg: 'var(--radius)',
-		  md: 'calc(var(--radius) - 2px)',
-		  sm: 'calc(var(--radius) - 4px)'
+		  lg: "var(--radius)",
+		  md: "calc(var(--radius) - 2px)",
+		  sm: "calc(var(--radius) - 4px)",
 		},
 		keyframes: {
 		  "accordion-down": {
@@ -5700,7 +8605,7 @@ export default {
 		},
 	  },
 	},
-	plugins: [require("tailwindcss-animate")]
+	plugins: [require("tailwindcss-animate")],
   }
 ```
 

@@ -1,31 +1,52 @@
-import { useState, useEffect } from 'react';
+// src/components/Mieter/TenantEditWrapper.tsx
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import TenantForm from './TenantForm';
+import { Tenant } from '@/types/tenant';
+import { useAsync } from '@/hooks/useAsync';
+import { TenantService } from '@/services/TenantService';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
 
 export default function TenantEditWrapper() {
-  const { id } = useParams();
-  const [tenant, setTenant] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  
-  useEffect(() => {
-    const loadTenant = async () => {
-      try {
-        const response = await fetch(`http://localhost:3001/tenants/${id}`);
-        if (!response.ok) throw new Error('Laden fehlgeschlagen');
-        const data = await response.json();
-        setTenant(data);
-      } catch (error) {
-        console.error('Fehler beim Laden:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  const { id } = useParams<{ id: string }>();
+  const [tenant, setTenant] = useState<Tenant | null>(null);
 
-    loadTenant();
+  const { execute: fetchTenant, isLoading, error } = useAsync(
+    () => TenantService.getById(Number(id)),
+    {
+      errorMessage: 'Fehler beim Laden des Mieters'
+    }
+  );
+
+  useEffect(() => {
+    if (id) {
+      loadTenant();
+    }
   }, [id]);
 
-  if (isLoading) return <div>Lade...</div>;
-  if (!tenant) return <div>Mieter nicht gefunden</div>;
-  
+  const loadTenant = async () => {
+    try {
+      const data = await fetchTenant();
+      setTenant(data);
+    } catch (error) {
+      console.error('Fehler beim Laden:', error);
+    }
+  };
+
+  if (isLoading) {
+    return <LoadingState />;
+  }
+
+  if (error || !tenant) {
+    return (
+      <ErrorState
+        title="Fehler beim Laden"
+        message={error?.message || 'Mieter nicht gefunden'}
+        onRetry={loadTenant}
+      />
+    );
+  }
+
   return <TenantForm initialData={tenant} />;
 }

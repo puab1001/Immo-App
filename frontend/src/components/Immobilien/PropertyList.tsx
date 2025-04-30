@@ -1,193 +1,118 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { PlusCircle, Pencil, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
-import { Property, Unit } from '@/types/property'
+// src/components/Immobilien/PropertyList.tsx
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Building2, PlusCircle } from 'lucide-react';
+import { Property } from '@/types/property';
+import { useAsync } from '@/hooks/useAsync';
+import { useConfirmation } from '@/hooks/useConfirmation';
+import { PropertyService } from '@/services/PropertyService';
+import { PropertyCard } from './PropertyCard';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
 
 export default function PropertyList() {
-  const [properties, setProperties] = useState<Property[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [isDeleting, setIsDeleting] = useState<number | null>(null)
-  const [expandedProperty, setExpandedProperty] = useState<number | null>(null)
-  const navigate = useNavigate()
+  const navigate = useNavigate();
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [expandedProperty, setExpandedProperty] = useState<number | null>(null);
+
+  const { execute: fetchProperties, isLoading, error } = useAsync<Property[]>(
+    () => PropertyService.getAll(),
+    {
+      errorMessage: 'Fehler beim Laden der Immobilien'
+    }
+  );
+
+  const { confirm: confirmDelete } = useConfirmation({
+    title: 'Immobilie löschen',
+    message: 'Möchten Sie diese Immobilie wirklich löschen? Alle zugehörigen Daten werden ebenfalls gelöscht.',
+    confirmText: 'Löschen',
+    cancelText: 'Abbrechen'
+  });
+
+  useEffect(() => {
+    loadProperties();
+  }, []);
 
   const loadProperties = async () => {
     try {
-      const response = await fetch('http://localhost:3001/properties')
-      if (!response.ok) {
-        throw new Error(await response.text())
-      }
-      const data = await response.json()
-      setProperties(data)
+      const data = await fetchProperties();
+      setProperties(data);
     } catch (error) {
-      console.error('Fehler beim Laden:', error)
-      alert('Fehler beim Laden der Immobilien')
-    } finally {
-      setIsLoading(false)
+      console.error('Fehler beim Laden:', error);
     }
-  }
+  };
 
-  useEffect(() => {
-    loadProperties()
-  }, [])
+  const handleDelete = async (id: number) => {
+    const confirmed = await confirmDelete();
+    if (!confirmed) return;
 
-  const toggleExpand = (propertyId: number | undefined) => {
-    if (!propertyId) return;
-    setExpandedProperty(expandedProperty === propertyId ? null : propertyId);
-  }
-
-  const handleDelete = async (id: number | undefined) => {
-    if (!id) return;
-    if (!confirm('Möchten Sie diese Immobilie wirklich löschen?')) return;
-
-    setIsDeleting(id);
     try {
-      const response = await fetch(`http://localhost:3001/properties/${id}`, {
-        method: 'DELETE'
-      });
-
-      if (!response.ok) {
-        throw new Error(await response.text())
-      }
-
-      await loadProperties()
+      await PropertyService.delete(id);
+      await loadProperties();
     } catch (error) {
-      console.error('Fehler beim Löschen:', error)
-      alert('Fehler beim Löschen der Immobilie')
-    } finally {
-      setIsDeleting(null)
+      console.error('Fehler beim Löschen:', error);
     }
+  };
+
+  if (isLoading) {
+    return <LoadingState />;
   }
 
-  if (isLoading) return <div>Lade Immobilien...</div>
+  if (error) {
+    return (
+      <ErrorState
+        title="Fehler beim Laden"
+        message={error.message}
+        onRetry={loadProperties}
+      />
+    );
+  }
 
   return (
-    <div className="p-4 max-w-4xl mx-auto">
+    <div className="p-4 max-w-5xl mx-auto">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Immobilienverwaltung</h1>
-        {properties.length > 0 && (
-          <Button
-            className="flex items-center gap-2"
-            onClick={() => navigate('/new')}
-          >
-            <PlusCircle className="w-4 h-4" />
-            Neue Immobilie
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          <Building2 className="w-6 h-6" />
+          <h1 className="text-2xl font-bold">Immobilien</h1>
+        </div>
+        <Button
+          onClick={() => navigate('/properties/new')}
+          className="flex items-center gap-2"
+        >
+          <PlusCircle className="w-4 h-4" />
+          Neue Immobilie
+        </Button>
       </div>
 
       {properties.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <p className="text-muted-foreground mb-4">Keine Immobilien vorhanden, Pul darbiar Azizam!</p>
-            <Button
-              onClick={() => navigate('/new')}
-              className="flex items-center gap-2"
-            >
-              <PlusCircle className="w-4 h-4" />
-              Erste Immobilie hinzufügen
-            </Button>
-          </CardContent>
-        </Card>
+        <EmptyState
+          title="Keine Immobilien vorhanden"
+          description="Fügen Sie Ihre erste Immobilie hinzu"
+          icon={<Building2 className="w-12 h-12 text-muted-foreground" />}
+          action={{
+            label: 'Erste Immobilie hinzufügen',
+            onClick: () => navigate('/properties/new')
+          }}
+        />
       ) : (
         <div className="grid gap-4">
           {properties.map(property => (
-            <Card key={property.id}>
-              <CardHeader>
-                <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => toggleExpand(property.id)}
-                      className="p-0 hover:bg-transparent"
-                    >
-                      {expandedProperty === property.id ?
-                        <ChevronUp className="w-4 h-4" /> :
-                        <ChevronDown className="w-4 h-4" />
-                      }
-                    </Button>
-                    <CardTitle>{property.address}</CardTitle>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => navigate(`/properties/edit/${property.id}`)} // Korrigierter Pfad
-                      disabled={isDeleting === property.id}
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleDelete(property.id)}
-                      disabled={isDeleting === property.id}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500">Art der Immobilie</p>
-                      <p>{property.property_type || 'Keine Angabe'}</p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-gray-500">Monatliche Gesamtmiete</p>
-                      <p className="font-medium">
-                        {property.total_rent?.toLocaleString('de-DE')} €
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Units Section */}
-                  {expandedProperty === property.id && property.units && property.units.length > 0 && (
-                    <div className="mt-4 border-t pt-4">
-                      <h3 className="text-sm font-semibold mb-3">Einheiten:</h3>
-                      <div className="grid gap-3">
-                        {property.units.map((unit, index) => (
-                          <div key={index} className="bg-gray-50 p-3 rounded-lg">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                              <div>
-                                <p className="text-xs text-gray-500">Name</p>
-                                <p className="text-sm font-medium">{unit.name}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-500">Typ</p>
-                                <p className="text-sm">{unit.type}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-500">Größe</p>
-                                <p className="text-sm">{unit.size} m²</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-500">Status</p>
-                                <p className="text-sm">{unit.status}</p>
-                              </div>
-                              {unit.status === 'besetzt' && (
-                                <div>
-                                  <p className="text-xs text-gray-500">Miete</p>
-                                  <p className="text-sm">{unit.rent} €</p>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+            <PropertyCard
+              key={property.id}
+              property={property}
+              isExpanded={expandedProperty === property.id}
+              onToggleExpand={() => setExpandedProperty(
+                expandedProperty === property.id ? null : property.id
+              )}
+              onEdit={() => navigate(`/properties/edit/${property.id}`)}
+              onDelete={() => handleDelete(property.id)}
+            />
           ))}
         </div>
       )}
     </div>
-  )
+  );
 }

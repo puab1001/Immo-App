@@ -1,32 +1,38 @@
-// src/components/EditPropertyWrapper.tsx
-import { useState, useEffect } from 'react';
+// src/components/Immobilien/EditPropertyWrapper.tsx
 import { useParams } from 'react-router-dom';
 import PropertyForm from './PropertyForm';
+import { useEffect, useState } from 'react';
+import { Property } from '@/types/property';
+import { PropertyService } from '@/services/PropertyService';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
 
 export default function EditPropertyWrapper() {
-  const { id } = useParams();
-  const [property, setProperty] = useState(null);
+  const { id } = useParams<{ id: string }>();
+  const [property, setProperty] = useState<Property | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  
+  const [error, setError] = useState<Error | null>(null);
+
   useEffect(() => {
-    const loadProperty = async () => {
+    async function loadProperty() {
       try {
-        const response = await fetch(`http://localhost:3001/properties/${id}`);
-        if (!response.ok) throw new Error('Laden fehlgeschlagen');
-        const data = await response.json();
+        setIsLoading(true);
+        const data = await PropertyService.getById(Number(id));
         setProperty(data);
-      } catch (error) {
-        console.error('Fehler beim Laden:', error);
+      } catch (err) {
+        setError(err instanceof Error ? err : new Error('Error loading property'));
       } finally {
         setIsLoading(false);
       }
-    };
+    }
 
-    loadProperty();
+    if (id) {
+      loadProperty();
+    }
   }, [id]);
 
-  if (isLoading) return <div>Lade...</div>;
-  if (!property) return <div>Immobilie nicht gefunden</div>;
-  
+  if (isLoading) return <LoadingState />;
+  if (error || !property) return <ErrorState title="Error" message={error?.message || 'Property not found'} />;
+
   return <PropertyForm initialData={property} />;
 }

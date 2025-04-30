@@ -5,7 +5,11 @@ import { Pool } from 'pg';
 import { createPropertyRoutes } from './routes/properties';
 import { createTenantRoutes } from './routes/tenants';
 import { createDocumentRoutes } from './routes/documents';
-import { createWorkerRoutes } from './routes/workers'; // Neuer Import
+import { createWorkerRoutes } from './routes/workers';
+import dotenv from 'dotenv';
+
+// Lade Umgebungsvariablen
+dotenv.config();
 
 const app = express();
 
@@ -15,12 +19,13 @@ app.use(express.json());
 
 // Datenbank-Verbindung
 const db = new Pool({
-  user: 'postgres',
-  password: 'Avintuk178_7!',
-  host: 'localhost',
-  port: 5432,
-  database: 'immo-db'
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  host: process.env.DB_HOST,
+  port: parseInt(process.env.DB_PORT || '5432'),
+  database: process.env.DB_NAME
 });
+
 
 console.log('Versuche Datenbankverbindung aufzubauen...');
 db.connect().then(() => {
@@ -33,7 +38,7 @@ db.connect().then(() => {
 app.use('/properties', createPropertyRoutes(db));
 app.use('/tenants', createTenantRoutes(db));
 app.use('/documents', createDocumentRoutes(db));
-app.use('/workers', createWorkerRoutes(db)); // Neue Route
+app.use('/workers', createWorkerRoutes(db));
 
 // Dashboard Statistiken Endpunkt
 app.get('/dashboard/stats', (_req, res) => {
@@ -41,16 +46,16 @@ app.get('/dashboard/stats', (_req, res) => {
     try {
       // Gesamtanzahl Immobilien
       const propertiesCount = await db.query('SELECT COUNT(*) FROM properties');
-
+      
       // Gesamtanzahl Wohneinheiten
       const unitsCount = await db.query('SELECT COUNT(*) FROM units');
-
+      
       // Monatliche Gesamtmiete
       const totalRent = await db.query(
         'SELECT COALESCE(SUM(rent), 0) FROM units WHERE status = $1', 
         ['besetzt']
       );
-
+      
       // Leerstehende Einheiten
       const vacantUnits = await db.query(`
         SELECT u.*, p.address as property_address
@@ -58,18 +63,18 @@ app.get('/dashboard/stats', (_req, res) => {
         JOIN properties p ON u.property_id = p.id
         WHERE u.status = $1
       `, ['verfügbar']);
-
-      // Aktive Handwerker (NEU)
+      
+      // Aktive Handwerker
       const workersCount = await db.query(
         'SELECT COUNT(*) FROM workers WHERE active = true'
       );
-
+      
       res.json({
         total_properties: propertiesCount.rows[0].count,
         total_units: unitsCount.rows[0].count,
         monthly_rent: totalRent.rows[0].coalesce,
         vacant_units: vacantUnits.rows,
-        active_workers: workersCount.rows[0].count // NEU
+        active_workers: workersCount.rows[0].count
       });
     } catch (error) {
       console.error('Dashboard Statistiken Fehler:', error);
@@ -79,7 +84,7 @@ app.get('/dashboard/stats', (_req, res) => {
 });
 
 // Server starten
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server läuft auf Port ${PORT}`);
 });

@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+// src/components/Mieter/TenantForm.tsx
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,107 +11,169 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-interface Unit {
-  id: number;
-  name: string;
-  property_address: string;
-  status: string;
-}
-
-interface Tenant {
-  id?: number;
-  first_name: string;
-  last_name: string;
-  email: string;
-  phone: string;
-  address: string;
-  unit_id?: number;
-  rent_start_date?: string;
-}
+import { TenantService } from '@/services/TenantService';
+import { PropertyService } from '@/services/PropertyService';
+import { useAsync } from '@/hooks/useAsync';
+import { useFormState } from '@/hooks/useFormState';
+import { useConfirmation } from '@/hooks/useConfirmation';
+import { Tenant, TenantFormData } from '@/types/tenant';
+import { Property, Unit } from '@/types/property';
+import { required, email, phone } from '@/lib/validators';
 
 interface TenantFormProps {
   initialData?: Tenant;
 }
 
+const INITIAL_TENANT_DATA: TenantFormData = {
+  first_name: '',
+  last_name: '',
+  email: '',
+  phone: '',
+  address: '',
+  unit_id: null,
+  rent_start_date: new Date().toISOString().split('T')[0],
+  rent_end_date: null
+};
+
 export default function TenantForm({ initialData }: TenantFormProps) {
   const navigate = useNavigate();
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [availableUnits, setAvailableUnits] = useState<Unit[]>([]);
+  
+  const {
+    formData,
+    updateField,
+    errors,
+    setErrors,
+    validateField
+  } = useFormState<TenantFormData>(
+    initialData || INITIAL_TENANT_DATA
+  );
 
-  // Form State mit initialData oder Defaultwerten
-  const [tenant, setTenant] = useState<Tenant>(() => ({
-    first_name: initialData?.first_name || '',
-    last_name: initialData?.last_name || '',
-    email: initialData?.email || '',
-    phone: initialData?.phone || '',
-    address: initialData?.address || '',
-    unit_id: initialData?.unit_id,
-    rent_start_date: initialData?.rent_start_date || new Date().toISOString().split('T')[0]
-  }));
+  // API calls
+  const { execute: saveTenant, isLoading: isSaving } = useAsync(
+    async (data: TenantFormData) => {
+      if (initialData) {
+        return TenantService.update(initialData.id, data);
+      }
+      return TenantService.create(data);
+    },
+    {
+      successMessage: initialData 
+        ? 'Mieter wurde erfolgreich aktualisiert'
+        : 'Mieter wurde erfolgreich erstellt',
+      errorMessage: 'Fehler beim Speichern des Mieters'
+    }
+  );
 
-  // Lade verfügbare Units
+  const { execute: fetchAvailableUnits } = useAsync(
+    () => PropertyService.getAll(),
+    {
+      errorMessage: 'Fehler beim Laden der verfügbaren Wohneinheiten'
+    }
+  );
+
+  // Confirmation Dialog
+  const confirmDiscardDialog = useConfirmation({
+    title: 'Änderungen verwerfen?',
+    message: 'Möchten Sie die Bearbeitung wirklich abbrechen? Alle nicht gespeicherten Änderungen gehen verloren.',
+    confirmText: 'Verwerfen',
+    cancelText: 'Weiter bearbeiten'
+  });
+
+  // Load available units on mount
   useEffect(() => {
-    const loadAvailableUnits = async () => {
-      try {
-        const response = await fetch('http://localhost:3001/properties');
-        if (!response.ok) throw new Error('Laden fehlgeschlagen');
-        const properties = await response.json();
-        
-        // Extrahiere alle verfügbaren Units aus den Properties
-        const units = properties.flatMap((property: any) => 
-          property.units
-            .filter((unit: any) => 
-              unit.status === 'verfügbar' || unit.id === initialData?.unit_id
-            )
-            .map((unit: any) => ({
-              ...unit,
-              property_address: property.address
-            }))
-        );
-        
-        setAvailableUnits(units);
-      } catch (error) {
-        console.error('Fehler beim Laden der Units:', error);
-      }
-    };
-
     loadAvailableUnits();
-  }, [initialData?.unit_id]);
+  }, []);
 
-  // Form Submit Handler
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-
+  const loadAvailableUnits = async () => {
     try {
-      const url = initialData
-        ? `http://localhost:3001/tenants/${initialData.id}`
-        : 'http://localhost:3001/tenants';
-
-      const response = await fetch(url, {
-        method: initialData ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(tenant)
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Ein Fehler ist aufgetreten');
-      }
-
-      navigate('/tenants');
+      const properties = await fetchAvailableUnits();
+      const units = properties.flatMap(property => 
+        property.units
+          .filter(unit => unit.status === 'verfügbar' || unit.id === initialData?.unit_id)
+          .map(unit => ({
+            ...unit,
+            property_address: property.address
+          }))
+      );
+      setAvailableUnits(units);
     } catch (error) {
-      console.error('Fehler beim Speichern:', error);
-      alert(error instanceof Error ? error.message : 'Ein Fehler ist aufgetreten');
-    } finally {
-      setIsSubmitting(false);
+      console.error('Fehler beim Laden der Wohneinheiten:', error);
     }
   };
 
+  // Form validation
+  const validateForm = (): boolean => {
+    let isValid = true;
+    const newErrors: Partial<Record<keyof TenantFormData, string>> = {};
+
+    // Required fields
+    if (!required(formData.first_name)) {
+      newErrors.first_name = 'Vorname ist erforderlich';
+      isValid = false;
+    }
+
+    if (!required(formData.last_name)) {
+      newErrors.last_name = 'Nachname ist erforderlich';
+      isValid = false;
+    }
+
+    const emailError = email(formData.email);
+    if (emailError) {
+      newErrors.email = emailError;
+      isValid = false;
+    }
+
+    const phoneError = phone(formData.phone);
+    if (phoneError) {
+      newErrors.phone = phoneError;
+      isValid = false;
+    }
+
+    if (!required(formData.address)) {
+      newErrors.address = 'Adresse ist erforderlich';
+      isValid = false;
+    }
+
+    if (!required(formData.rent_start_date)) {
+      newErrors.rent_start_date = 'Mietbeginn ist erforderlich';
+      isValid = false;
+    }
+
+    setErrors(newErrors);
+    return isValid;
+  };
+
+  // Form submission
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
+    }
+
+    try {
+      await saveTenant(formData);
+      navigate('/tenants');
+    } catch (error) {
+      // Error wird bereits durch useAsync behandelt
+    }
+  };
+
+  // Cancel handling
+  const handleCancel = async () => {
+    const hasChanges = JSON.stringify(initialData) !== JSON.stringify(formData);
+    if (hasChanges) {
+      const confirmed = await confirmDiscardDialog.confirm();
+      if (!confirmed) return;
+    }
+    navigate('/tenants');
+  };
+
   return (
-    <div className="p-4 max-w-2xl mx-auto">
+    <div className="p-4 max-w-3xl mx-auto">
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Persönliche Informationen */}
         <Card>
           <CardHeader>
             <CardTitle>
@@ -118,113 +181,157 @@ export default function TenantForm({ initialData }: TenantFormProps) {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Persönliche Daten */}
             <div className="grid grid-cols-2 gap-4">
+              {/* Vorname */}
               <div>
                 <label className="text-sm font-medium">Vorname</label>
                 <Input
-                  required
-                  value={tenant.first_name}
-                  onChange={e => setTenant({ ...tenant, first_name: e.target.value })}
+                  value={formData.first_name}
+                  onChange={e => updateField('first_name', e.target.value)}
                   className="mt-1"
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                 />
+                {errors.first_name && (
+                  <p className="text-sm text-destructive mt-1">{errors.first_name}</p>
+                )}
               </div>
 
+              {/* Nachname */}
               <div>
                 <label className="text-sm font-medium">Nachname</label>
                 <Input
-                  required
-                  value={tenant.last_name}
-                  onChange={e => setTenant({ ...tenant, last_name: e.target.value })}
+                  value={formData.last_name}
+                  onChange={e => updateField('last_name', e.target.value)}
                   className="mt-1"
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                 />
+                {errors.last_name && (
+                  <p className="text-sm text-destructive mt-1">{errors.last_name}</p>
+                )}
               </div>
 
+              {/* Email */}
               <div>
                 <label className="text-sm font-medium">E-Mail</label>
                 <Input
                   type="email"
-                  value={tenant.email}
-                  onChange={e => setTenant({ ...tenant, email: e.target.value })}
+                  value={formData.email}
+                  onChange={e => updateField('email', e.target.value)}
                   className="mt-1"
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                 />
+                {errors.email && (
+                  <p className="text-sm text-destructive mt-1">{errors.email}</p>
+                )}
               </div>
 
+              {/* Telefon */}
               <div>
                 <label className="text-sm font-medium">Telefon</label>
                 <Input
                   type="tel"
-                  value={tenant.phone}
-                  onChange={e => setTenant({ ...tenant, phone: e.target.value })}
+                  value={formData.phone}
+                  onChange={e => updateField('phone', e.target.value)}
                   className="mt-1"
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                 />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium">Adresse</label>
-              <Input
-                value={tenant.address}
-                onChange={e => setTenant({ ...tenant, address: e.target.value })}
-                className="mt-1"
-                disabled={isSubmitting}
-              />
-            </div>
-
-            {/* Wohneinheit und Mietbeginn */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium">Wohneinheit</label>
-                <Select
-                  value={tenant.unit_id?.toString()}
-                  onValueChange={(value) => 
-                    setTenant({ ...tenant, unit_id: parseInt(value) })
-                  }
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Wohneinheit auswählen" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableUnits.map((unit) => (
-                      <SelectItem key={unit.id} value={unit.id.toString()}>
-                        {unit.name} ({unit.property_address})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {errors.phone && (
+                  <p className="text-sm text-destructive mt-1">{errors.phone}</p>
+                )}
               </div>
 
-              <div>
-                <label className="text-sm font-medium">Mietbeginn</label>
+              {/* Adresse */}
+              <div className="col-span-2">
+                <label className="text-sm font-medium">Adresse</label>
                 <Input
-                  type="date"
-                  value={tenant.rent_start_date}
-                  onChange={e => setTenant({ ...tenant, rent_start_date: e.target.value })}
+                  value={formData.address}
+                  onChange={e => updateField('address', e.target.value)}
                   className="mt-1"
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                 />
+                {errors.address && (
+                  <p className="text-sm text-destructive mt-1">{errors.address}</p>
+                )}
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Formular-Buttons */}
-        <div className="flex gap-4">
+        {/* Mietverhältnis */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Mietverhältnis</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Wohneinheit */}
+            <div>
+              <label className="text-sm font-medium">Wohneinheit</label>
+              <Select
+                value={formData.unit_id?.toString() || ''}
+                onValueChange={(value) => updateField('unit_id', value ? parseInt(value) : null)}
+                disabled={isSaving}
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Wohneinheit wählen" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Keine Wohneinheit</SelectItem>
+                  {availableUnits.map((unit) => (
+                    <SelectItem key={unit.id} value={unit.id.toString()}>
+                      {unit.name} ({unit.property_address})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              {/* Mietbeginn */}
+              <div>
+                <label className="text-sm font-medium">Mietbeginn</label>
+                <Input
+                  type="date"
+                  value={formData.rent_start_date}
+                  onChange={e => updateField('rent_start_date', e.target.value)}
+                  className="mt-1"
+                  disabled={isSaving}
+                />
+                {errors.rent_start_date && (
+                  <p className="text-sm text-destructive mt-1">{errors.rent_start_date}</p>
+                )}
+              </div>
+
+              {/* Mietende */}
+              <div>
+                <label className="text-sm font-medium">Mietende (optional)</label>
+                <Input
+                  type="date"
+                  value={formData.rent_end_date || ''}
+                  onChange={e => updateField('rent_end_date', e.target.value || null)}
+                  className="mt-1"
+                  disabled={isSaving}
+                />
+                {errors.rent_end_date && (
+                  <p className="text-sm text-destructive mt-1">{errors.rent_end_date}</p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Form Buttons */}
+        <div className="flex justify-end gap-4">
           <Button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSaving}
           >
-            {isSubmitting ? 'Wird gespeichert...' : 'Speichern'}
+            {isSaving ? 'Wird gespeichert...' : 'Speichern'}
           </Button>
           <Button
             type="button"
             variant="outline"
-            onClick={() => navigate('/tenants')}
-            disabled={isSubmitting}
+            onClick={handleCancel}
+            disabled={isSaving}
           >
             Abbrechen
           </Button>

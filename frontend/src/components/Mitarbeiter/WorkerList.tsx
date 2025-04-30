@@ -1,172 +1,170 @@
-// src/components/Handwerker/WorkerList.tsx
+// src/components/Mitarbeiter/WorkerList.tsx
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { 
   UserPlus, 
-  Pencil, 
-  Trash2,
-  Phone,
-  Mail,
-  Wrench
+  Users, 
+  Search, 
+  Wrench,
+  Filter
 } from 'lucide-react';
-
-interface Skill {
-  id: number;
-  name: string;
-  experience_years: number;
-}
-
-interface Worker {
-  id: number;
-  first_name: string;
-  last_name: string;
-  phone: string;
-  email: string;
-  hourly_rate: number;
-  skills: Skill[];
-  active: boolean;
-}
+import { Worker } from '@/types/worker';
+import { useAsync } from '@/hooks/useAsync';
+import { WorkerService } from '@/services/WorkerService';
+import { WorkerCard } from '@/components/Mitarbeiter/WorkerCard';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export default function WorkerList() {
-  const [workers, setWorkers] = useState<Worker[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isDeleting, setIsDeleting] = useState<number | null>(null);
   const navigate = useNavigate();
+  const [workers, setWorkers] = useState<Worker[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedSkill, setSelectedSkill] = useState<string>('all');
+  const [availableSkills, setAvailableSkills] = useState<Array<{ id: number; name: string }>>([]);
+
+  const { execute: fetchWorkers, isLoading, error } = useAsync<Worker[]>(
+    () => WorkerService.getAll(),
+    {
+      errorMessage: 'Fehler beim Laden der Handwerker'
+    }
+  );
+
+  const { execute: fetchSkills } = useAsync(
+    () => WorkerService.getSkills(),
+    {
+      errorMessage: 'Fehler beim Laden der Fähigkeiten'
+    }
+  );
 
   useEffect(() => {
     loadWorkers();
+    loadSkills();
   }, []);
 
   const loadWorkers = async () => {
     try {
-      const response = await fetch('http://localhost:3001/workers');
-      if (!response.ok) throw new Error('Laden fehlgeschlagen');
-      const data = await response.json();
+      const data = await fetchWorkers();
       setWorkers(data);
     } catch (error) {
       console.error('Fehler beim Laden:', error);
-    } finally {
-      setIsLoading(false);
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Möchten Sie diesen Handwerker wirklich deaktivieren?')) return;
-
-    setIsDeleting(id);
+  const loadSkills = async () => {
     try {
-      const response = await fetch(`http://localhost:3001/workers/${id}`, {
-        method: 'DELETE'
-      });
-
-      if (!response.ok) throw new Error('Löschen fehlgeschlagen');
-      await loadWorkers();
+      const skills = await fetchSkills();
+      setAvailableSkills(skills);
     } catch (error) {
-      console.error('Fehler beim Deaktivieren:', error);
-    } finally {
-      setIsDeleting(null);
+      console.error('Fehler beim Laden der Fähigkeiten:', error);
     }
   };
 
-  if (isLoading) return <div>Lade Handwerker...</div>;
+  const filteredWorkers = workers.filter(worker => {
+    const matchesSearch = (
+      worker.first_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      worker.last_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      worker.email.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    const matchesSkill = selectedSkill === 'all' || 
+      worker.skills.some(skill => skill.id.toString() === selectedSkill);
+
+    return matchesSearch && matchesSkill;
+  });
+
+  if (isLoading) {
+    return <LoadingState />;
+  }
+
+  if (error) {
+    return (
+      <ErrorState
+        title="Fehler beim Laden"
+        message={error.message}
+        onRetry={loadWorkers}
+      />
+    );
+  }
 
   return (
-    <div className="p-4 max-w-4xl mx-auto">
+    <div className="p-4 max-w-5xl mx-auto">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Handwerkerverwaltung</h1>
+        <div className="flex items-center gap-2">
+          <Wrench className="w-6 h-6" />
+          <h1 className="text-2xl font-bold">Handwerker</h1>
+        </div>
         <Button
-          className="flex items-center gap-2"
           onClick={() => navigate('/workers/new')}
+          className="flex items-center gap-2"
         >
           <UserPlus className="w-4 h-4" />
           Neuer Handwerker
         </Button>
       </div>
 
+      {/* Filter und Suche */}
+      <div className="grid gap-4 mb-6 md:grid-cols-2">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            placeholder="Handwerker suchen..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <div className="relative">
+          <Select 
+            value={selectedSkill}
+            onValueChange={setSelectedSkill}
+          >
+            <SelectTrigger className="w-full">
+              <Filter className="w-4 h-4 mr-2" />
+              <SelectValue placeholder="Nach Fähigkeit filtern" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Alle Fähigkeiten</SelectItem>
+              {availableSkills.map(skill => (
+                <SelectItem key={skill.id} value={skill.id.toString()}>
+                  {skill.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
       {workers.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <p className="text-muted-foreground mb-4">Keine Handwerker vorhanden</p>
-            <Button
-              onClick={() => navigate('/workers/new')}
-              className="flex items-center gap-2"
-            >
-              <UserPlus className="w-4 h-4" />
-              Ersten Handwerker hinzufügen
-            </Button>
-          </CardContent>
+        <EmptyState
+          title="Keine Handwerker vorhanden"
+          description="Fügen Sie Ihren ersten Handwerker hinzu"
+          icon={<Wrench className="w-12 h-12 text-muted-foreground" />}
+          action={{
+            label: 'Ersten Handwerker hinzufügen',
+            onClick: () => navigate('/workers/new')
+          }}
+        />
+      ) : filteredWorkers.length === 0 ? (
+        <Card className="p-6 text-center">
+          <p className="text-muted-foreground">
+            Keine Handwerker gefunden für Ihre Filterkriterien
+          </p>
         </Card>
       ) : (
         <div className="grid gap-4">
-          {workers.map(worker => (
-            <Card key={worker.id}>
-              <CardHeader>
-                <div className="flex justify-between items-start">
-                  <CardTitle className="text-xl">
-                    {worker.first_name} {worker.last_name}
-                  </CardTitle>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => navigate(`/workers/edit/${worker.id}`)}
-                      disabled={isDeleting === worker.id}
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleDelete(worker.id)}
-                      disabled={isDeleting === worker.id}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Kontaktinformationen */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Phone className="w-4 h-4 text-muted-foreground" />
-                      <span>{worker.phone}</span>
-                    </div>
-                    {worker.email && (
-                      <div className="flex items-center gap-2 text-sm">
-                        <Mail className="w-4 h-4 text-muted-foreground" />
-                        <span>{worker.email}</span>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2 text-sm">
-                      <span className="font-medium">Stundensatz:</span>
-                      <span>{worker.hourly_rate} €/h</span>
-                    </div>
-                  </div>
-
-                  {/* Fähigkeiten */}
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Wrench className="w-4 h-4 text-muted-foreground" />
-                      <span className="font-medium">Fähigkeiten:</span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {worker.skills?.map((skill, index) => (
-                        <span
-                          key={index}
-                          className="inline-flex items-center px-2 py-1 rounded-md bg-secondary text-secondary-foreground text-sm"
-                        >
-                          {skill.name} ({skill.experience_years} Jahre)
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+          {filteredWorkers.map(worker => (
+            <WorkerCard
+              key={worker.id}
+              worker={worker}
+              onEdit={() => navigate(`/workers/edit/${worker.id}`)}
+              onView={() => navigate(`/workers/${worker.id}`)}
+            />
           ))}
         </div>
       )}

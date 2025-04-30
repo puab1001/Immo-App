@@ -1,34 +1,24 @@
-// types/property.ts
+// src/types/property.ts
+import { BaseEntity } from './common';
 
-export interface Property {
-  id?: number;
+export interface Property extends BaseEntity {
   address: string;
-  size: number;
-  price: number;
   property_type: string;
-  total_rent: number; 
+  total_rent: number;
   units: Unit[];
 }
 
-export interface Unit {
-  id?: number;
+export interface Unit extends BaseEntity {
+  property_id: number;
   name: string;
   type: string;
   size: number;
-  status: string;
-  rent: number;
+  status: 'verfügbar' | 'besetzt';
+  rent?: number;
 }
 
 export interface PropertyFormData {
   address: string;
-  size: number | string;
-  price: number | string;
-  status: string;
   property_type: string;
-  units?: Unit[];
-}
-
-export interface ApiResponse<T> {
-  data?: T;
-  error?: string;
+  units: Omit<Unit, 'id' | 'property_id' | 'created_at' | 'updated_at'>[];
 }

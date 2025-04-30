@@ -1,7 +1,9 @@
+// backend/src/routes/documents.ts (mit Preview-Endpunkt)
 import express, { Request, Response } from 'express';
 import multer from 'multer';
 import { Pool } from 'pg';
 import { DocumentService } from '../services/DocumentService';
+import path from 'path';
 
 const upload = multer({
  storage: multer.memoryStorage(),
@@ -134,6 +136,41 @@ export const createDocumentRoutes = (db: Pool) => {
      } catch (error) {
        console.error('Error uploading document:', error);
        res.status(500).json({ error: 'Error uploading document' });
+     }
+   })();
+ });
+
+ // GET: Dokument-Vorschau
+ router.get('/:id/preview', (req: Request, res: Response) => {
+   (async () => {
+     try {
+       const id = parseInt(req.params.id);
+       if (isNaN(id)) {
+         return res.status(400).json({ error: 'Invalid document ID' });
+       }
+
+       const document = await documentService.getDocument(id, { withContent: true });
+       if (!document) {
+         return res.status(404).json({ error: 'Document not found' });
+       }
+
+       // Bei Bildern und PDFs können wir Vorschau als Original zurückgeben
+       if (document.mime_type.startsWith('image/') || document.mime_type === 'application/pdf') {
+         res.set({
+           'Content-Type': document.mime_type,
+           'Content-Length': document.content?.length,
+         });
+         
+         res.send(document.content);
+         return;
+       }
+
+       // Für andere Dateitypen eine generische Vorschau zurückgeben
+       // Hier könnten Sie bei Bedarf Thumbnails für verschiedene Dateitypen generieren
+       res.status(415).json({ error: 'No preview available for this file type' });
+     } catch (error) {
+       console.error('Error generating preview:', error);
+       res.status(500).json({ error: 'Error generating document preview' });
      }
    })();
  });
