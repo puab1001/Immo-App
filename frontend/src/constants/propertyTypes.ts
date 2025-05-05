@@ -62,8 +62,9 @@ export const DOCUMENT_TYPES = {
 // API Configuration
 export const API_CONFIG = {
   baseUrl: 'http://localhost:3001',
-  timeout: 5000,
+  timeout: 15000,  // Increased from 5000ms to 15000ms
   retryAttempts: 3,
+  loadingStateTimeout: 30000, // 30 seconds max for loading states
 } as const;
 
 // Table Configuration

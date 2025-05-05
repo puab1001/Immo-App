@@ -143,21 +143,47 @@ export default function WorkerForm({ initialData }: WorkerFormProps) {
     return isValid;
   };
 
-  // Form submission
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!validateForm()) {
-      return;
-    }
+ // src/components/Mitarbeiter/WorkerForm.tsx (Form submission part)
 
-    try {
-      await saveWorker(formData);
-      navigate('/workers');
-    } catch (error) {
-      // Error wird bereits durch useAsync behandelt
-    }
-  };
+// Replace the handleSubmit function in WorkerForm.tsx with this improved version:
+
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  
+  if (!validateForm()) {
+    return;
+  }
+
+  try {
+    // Format skills properly, ensuring each skill has proper numeric values
+    const formattedSkills = formData.skills.map(skill => ({
+      id: typeof skill.id === 'string' ? parseInt(skill.id) : Number(skill.id),
+      experience_years: typeof skill.experience_years === 'string' 
+        ? parseInt(skill.experience_years) 
+        : Number(skill.experience_years)
+    }));
+
+    // Create a clean submission object with proper types
+    const submissionData = {
+      ...formData,
+      hourly_rate: typeof formData.hourly_rate === 'string' 
+        ? parseFloat(formData.hourly_rate) 
+        : formData.hourly_rate,
+      skills: formattedSkills,
+      active: formData.active !== undefined ? formData.active : true
+    };
+
+    // Log submission data for debugging
+    console.log('Submitting worker data:', submissionData);
+    
+    const result = await saveWorker(submissionData);
+    console.log('Worker saved successfully:', result);
+    navigate('/workers');
+  } catch (error) {
+    console.error('Error during form submission:', error);
+    // Error already handled by useAsync
+  }
+};
 
   // Cancel handling
   const handleCancel = async () => {
@@ -182,8 +208,27 @@ export default function WorkerForm({ initialData }: WorkerFormProps) {
   const updateSkill = (index: number, field: keyof WorkerSkill, value: any) => {
     const newSkills = formData.skills.map((skill, i) => {
       if (i !== index) return skill;
+      
+      // Make sure we're handling skill IDs consistently
+      if (field === 'id') {
+        const skillId = typeof value === 'string' ? parseInt(value) : Number(value);
+        
+        // If we have a skill name in the available skills, include it
+        const selectedSkill = availableSkills.find(s => s.id === skillId);
+        if (selectedSkill) {
+          return { 
+            ...skill, 
+            id: skillId,
+            name: selectedSkill.name 
+          };
+        }
+        
+        return { ...skill, id: skillId };
+      }
+      
       return { ...skill, [field]: value };
     });
+    
     updateField('skills', newSkills);
   };
 

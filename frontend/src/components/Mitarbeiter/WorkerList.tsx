@@ -19,6 +19,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { API } from '@/services/api';
 
 export default function WorkerList() {
   const navigate = useNavigate();
@@ -30,14 +31,16 @@ export default function WorkerList() {
   const { execute: fetchWorkers, isLoading, error } = useAsync<Worker[]>(
     () => WorkerService.getAll(),
     {
-      errorMessage: 'Fehler beim Laden der Handwerker'
+      errorMessage: 'Fehler beim Laden der Handwerker',
+      loadingTimeout: API.loadingStateTimeout
     }
   );
 
   const { execute: fetchSkills } = useAsync(
     () => WorkerService.getSkills(),
     {
-      errorMessage: 'Fehler beim Laden der Fähigkeiten'
+      errorMessage: 'Fehler beim Laden der Fähigkeiten',
+      loadingTimeout: API.loadingStateTimeout
     }
   );
 

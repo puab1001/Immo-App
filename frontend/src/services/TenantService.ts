@@ -18,7 +18,13 @@ export class TenantService {
   }
 
   static async update(id: number, data: TenantFormData): Promise<Tenant> {
-    return API.put<Tenant>(`${this.endpoint}/${id}`, data);
+    // Make sure we're sending the active status which might be needed by the backend
+    const updatedData = {
+      ...data,
+      active: true, // Assume active for updates unless explicitly set otherwise
+    };
+    
+    return API.put<Tenant>(`${this.endpoint}/${id}`, updatedData);
   }
 
   static async delete(id: number): Promise<void> {

@@ -24,4 +24,8 @@ export class PropertyService {
   static async delete(id: number): Promise<void> {
     return API.delete(`${this.endpoint}/${id}`);
   }
+  
+  static async deleteWithConfirm(id: number): Promise<boolean> {
+    return API.deleteWithConfirm(`${this.endpoint}/${id}`);
+  }
 }

@@ -12,6 +12,7 @@ import { TenantCard } from '@/components/Mieter/TenantCard';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { API } from '@/services/api';
 
 export default function TenantList() {
   const navigate = useNavigate();
@@ -21,7 +22,8 @@ export default function TenantList() {
   const { execute: fetchTenants, isLoading, error } = useAsync<Tenant[]>(
     () => TenantService.getAll(),
     {
-      errorMessage: 'Fehler beim Laden der Mieter'
+      errorMessage: 'Fehler beim Laden der Mieter',
+      loadingTimeout: API.loadingStateTimeout
     }
   );
 

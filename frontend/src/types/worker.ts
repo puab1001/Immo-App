@@ -28,7 +28,7 @@ export interface WorkerFormData {
   last_name: string;
   phone: string;
   email: string;
-  hourly_rate: number | string;
+  hourly_rate: number | string; // Accept both types for form handling flexibility
   skills: WorkerSkill[];
-  active?: boolean;
+  active: boolean; // Make sure this is required
 }

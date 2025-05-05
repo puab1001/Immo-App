@@ -69,7 +69,6 @@ const db = new Pool({
   database: process.env.DB_NAME
 });
 
-
 console.log('Versuche Datenbankverbindung aufzubauen...');
 db.connect().then(() => {
   console.log('Datenbankverbindung erfolgreich!');
@@ -83,47 +82,216 @@ app.use('/tenants', createTenantRoutes(db));
 app.use('/documents', createDocumentRoutes(db));
 app.use('/workers', createWorkerRoutes(db));
 
+// Typdefinitionen für Dashboard-Statistiken
+interface VacantUnit {
+  id: number;
+  name: string;
+  property_address: string;
+  type: string;
+  size: number;
+}
+
+interface DashboardStats {
+  total_properties: number;
+  total_units: number;
+  monthly_rent: number;
+  vacant_units: VacantUnit[];
+  active_workers: number;
+}
+
+// Typdefinitionen für Diagnose
+interface DiagnosticResults {
+  server: {
+    status: string;
+    timestamp: string;
+    environment: string;
+  };
+  database: {
+    status: string;
+    connected: boolean;
+    tables: Record<string, number>;
+    error: string | null;
+  };
+}
+
 // Dashboard Statistiken Endpunkt
 app.get('/dashboard/stats', (_req, res) => {
   (async () => {
     try {
-      // Gesamtanzahl Immobilien
-      const propertiesCount = await db.query('SELECT COUNT(*) FROM properties');
+      console.log('Dashboard stats endpoint called');
+      
+      // Einfachere Queries mit klarem Fehlerhandling
+      const stats: DashboardStats = {
+        total_properties: 0,
+        total_units: 0,
+        monthly_rent: 0,
+        vacant_units: [],
+        active_workers: 0
+      };
+
+      let dbConnected = false;
+      
+      try {
+        // Teste Datenbankverbindung zuerst
+        await db.query('SELECT NOW()');
+        dbConnected = true;
+        console.log('Database connection for dashboard is OK');
+      } catch (connErr) {
+        console.error('Datenbankverbindungsfehler bei Dashboard:', connErr);
+        // Sende Statistiken mit Standardwerten zurück, aber log den Fehler
+        return res.json(stats);
+      }
+
+      if (!dbConnected) {
+        return res.json(stats);
+      }
+
+      // Gesamtanzahl Immobilien - mit explizitem Error Handling
+      try {
+        const propertiesResult = await db.query('SELECT COUNT(*) as count FROM properties');
+        stats.total_properties = parseInt(propertiesResult.rows[0].count) || 0;
+        console.log('Properties count:', stats.total_properties);
+      } catch (err) {
+        console.error('Fehler beim Zählen der Immobilien:', err);
+        // Wir setzen fort mit Standardwert 0
+      }
       
       // Gesamtanzahl Wohneinheiten
-      const unitsCount = await db.query('SELECT COUNT(*) FROM units');
+      try {
+        const unitsResult = await db.query('SELECT COUNT(*) as count FROM units');
+        stats.total_units = parseInt(unitsResult.rows[0].count) || 0;
+        console.log('Units count:', stats.total_units);
+      } catch (err) {
+        console.error('Fehler beim Zählen der Wohneinheiten:', err);
+      }
       
-      // Monatliche Gesamtmiete
-      const totalRent = await db.query(
-        'SELECT COALESCE(SUM(rent), 0) FROM units WHERE status = $1', 
-        ['besetzt']
-      );
+      // Monatliche Gesamtmiete - robust gegen NULL-Werte
+      try {
+        const rentResult = await db.query(
+          'SELECT COALESCE(SUM(rent), 0) as total FROM units WHERE status = $1', 
+          ['besetzt']
+        );
+        stats.monthly_rent = parseFloat(rentResult.rows[0].total) || 0;
+        console.log('Monthly rent:', stats.monthly_rent);
+      } catch (err) {
+        console.error('Fehler beim Berechnen der Gesamtmiete:', err);
+      }
       
-      // Leerstehende Einheiten
-      const vacantUnits = await db.query(`
-        SELECT u.*, p.address as property_address
-        FROM units u
-        JOIN properties p ON u.property_id = p.id
-        WHERE u.status = $1
-      `, ['verfügbar']);
+      // Leerstehende Einheiten - Vereinfachte Abfrage
+      try {
+        const vacantResult = await db.query(`
+          SELECT 
+            u.id, 
+            u.name, 
+            u.type, 
+            u.size, 
+            p.address as property_address
+          FROM units u
+          JOIN properties p ON u.property_id = p.id
+          WHERE u.status = $1
+        `, ['verfügbar']);
+        
+        stats.vacant_units = vacantResult.rows.map(unit => ({
+          id: unit.id,
+          name: unit.name,
+          property_address: unit.property_address,
+          type: unit.type,
+          size: unit.size
+        }));
+        console.log('Vacant units count:', stats.vacant_units.length);
+      } catch (err) {
+        console.error('Fehler beim Laden leerstehender Einheiten:', err);
+      }
       
       // Aktive Handwerker
-      const workersCount = await db.query(
-        'SELECT COUNT(*) FROM workers WHERE active = true'
-      );
+      try {
+        const workersResult = await db.query(
+          'SELECT COUNT(*) as count FROM workers WHERE active = true'
+        );
+        stats.active_workers = parseInt(workersResult.rows[0].count) || 0;
+        console.log('Active workers count:', stats.active_workers);
+      } catch (err) {
+        console.error('Fehler beim Zählen aktiver Handwerker:', err);
+      }
+
+      // Log der Ergebnisse für Debugging
+      console.log('Dashboard stats generated:', stats);
       
-      res.json({
-        total_properties: propertiesCount.rows[0].count,
-        total_units: unitsCount.rows[0].count,
-        monthly_rent: totalRent.rows[0].coalesce,
-        vacant_units: vacantUnits.rows,
-        active_workers: workersCount.rows[0].count
-      });
-    } catch (error) {
+      // Erfolgreiche Antwort senden
+      res.json(stats);
+    } catch (error: any) {
+      // Allgemeiner Fehlerfall
       console.error('Dashboard Statistiken Fehler:', error);
-      res.status(500).json({ error: 'Fehler beim Laden der Dashboard-Daten' });
+      res.status(500).json({ 
+        error: 'Fehler beim Laden der Dashboard-Daten',
+        message: error.message 
+      });
     }
   })();
+});
+
+// Diagnose-Endpunkt
+app.get('/api/diagnostic', async (_req, res) => {
+  console.log('Diagnostic endpoint called');
+  
+  const diagnosticResults: DiagnosticResults = {
+    server: {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development'
+    },
+    database: {
+      status: 'unknown',
+      connected: false,
+      tables: {},
+      error: null
+    }
+  };
+  
+  try {
+    // Teste Datenbankverbindung
+    await db.query('SELECT NOW()');
+    diagnosticResults.database.connected = true;
+    diagnosticResults.database.status = 'ok';
+    
+    // Prüfe Tabellen und Datensätze
+    try {
+      const tablesCheck = {
+        properties: await db.query('SELECT COUNT(*) as count FROM properties'),
+        units: await db.query('SELECT COUNT(*) as count FROM units'),
+        tenants: await db.query('SELECT COUNT(*) as count FROM tenants'),
+        workers: await db.query('SELECT COUNT(*) as count FROM workers'),
+        documents: await db.query('SELECT COUNT(*) as count FROM documents')
+      };
+      
+      // Extrahiere Anzahl der Datensätze pro Tabelle
+      diagnosticResults.database.tables = {
+        properties: parseInt(tablesCheck.properties.rows[0].count) || 0,
+        units: parseInt(tablesCheck.units.rows[0].count) || 0,
+        tenants: parseInt(tablesCheck.tenants.rows[0].count) || 0,
+        workers: parseInt(tablesCheck.workers.rows[0].count) || 0,
+        documents: parseInt(tablesCheck.documents.rows[0].count) || 0
+      };
+    } catch (tableError: any) {
+      diagnosticResults.database.status = 'partial';
+      diagnosticResults.database.error = `Tabellenfehler: ${tableError.message}`;
+    }
+  } catch (dbError: any) {
+    diagnosticResults.database.status = 'error';
+    diagnosticResults.database.error = `Verbindungsfehler: ${dbError.message}`;
+  }
+  
+  // Sende Diagnoseergebnisse zurück
+  res.json(diagnosticResults);
+});
+
+// CORS-Konfigurationstest-Endpoint
+app.get('/api/cors-test', (_req, res) => {
+  res.json({ 
+    status: 'ok',
+    message: 'CORS ist korrekt konfiguriert',
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Server starten
@@ -1346,6 +1514,10 @@ export class DocumentService {
 }
 ```
 
+# backend/uploads/general/d5164adba8945553670c8f58bec82afcd891ccd0ce2eff80806b725ead28c237.jpg
+
+This is a binary file of the type: Image
+
 # backend/uploads/tenant_3/b775842b031b8badd7f970766b19ba7c92b0d26559f106dcac47978fe8ab1a22.pdf
 
 This is a binary file of the type: PDF
@@ -1633,7 +1805,7 @@ export default tseslint.config({
 # frontend/src/App.tsx
 
 ```tsx
-// src/App.tsx
+// src/App.tsx - Überarbeitete Version
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Providers } from "@/components/providers"
 import Sidebar from './components/Sidebar'
@@ -1650,23 +1822,24 @@ import DocumentUpload from './components/Dokumente/DocumentUpload'
 import WorkerList from './components/Mitarbeiter/WorkerList'
 import WorkerForm from './components/Mitarbeiter/WorkerForm'
 import WorkerEditWrapper from './components/Mitarbeiter/WorkerEditWrapper'
-
 function App() {
   return (
     <Providers>
       <BrowserRouter>
+        {/* Wichtig: Sidebar bleibt beim Routing bestehen */}
         <Sidebar>
           <Routes>
+            {/* Hier die statischen Routen definieren */}
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             
-            {/* Property Routes */}
+            {/* Property Routes - sortiere sie richtig */}
             <Route path="/properties" element={<PropertyList />} />
             <Route path="/properties/new" element={<PropertyForm />} />
             <Route path="/properties/edit/:id" element={<EditPropertyWrapper />} />
             
-            {/* Tenant Routes */}
-            <Route path="/tenants" element={<TenantList />} />
+           {/* Tenant Routes */}
+           <Route path="/tenants" element={<TenantList />} />
             <Route path="/tenants/new" element={<TenantForm />} />
             <Route path="/tenants/edit/:id" element={<TenantEditWrapper />} />
             
@@ -1701,22 +1874,17 @@ This is a file of the type: SVG Image
 ```tsx
 import { useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Building2, Home, Currency, AlertCircle } from 'lucide-react';
+import { Building2, Home, Currency, AlertCircle, Wrench } from 'lucide-react';
 import { useAsync } from '@/hooks/useAsync';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { formatCurrency } from '@/lib/formatters';
 
 interface DashboardStats {
     total_properties: number;
     total_units: number;
     monthly_rent: number;
-    top_properties: Array<{
-        id: number;
-        address: string;
-        property_type: string;
-        total_rent: number;
-    }>;
     vacant_units: Array<{
         id: number;
         name: string;
@@ -1724,31 +1892,94 @@ interface DashboardStats {
         type: string;
         size: number;
     }>;
+    active_workers: number;
 }
 
 export default function Dashboard() {
     const { execute: fetchDashboardStats, data: stats, isLoading, error } = useAsync<DashboardStats>(
         async () => {
-            const response = await fetch('http://localhost:3001/dashboard/stats');
-            if (!response.ok) {
-                throw new Error('Fehler beim Laden der Dashboard-Daten');
+            console.log('Fetching dashboard stats...');
+            try {
+                // Klare Timeout-Einstellung für den Fetch
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 Sekunden Timeout
+                
+                // Verwende die API-Klasse für konsistentes Fehlerhandling
+                const response = await fetch('http://localhost:3001/dashboard/stats', {
+                    signal: controller.signal,
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (!response.ok) {
+                    console.error('API response not OK:', response.status, response.statusText);
+                    throw new Error(`Fehler beim Laden: ${response.status} ${response.statusText}`);
+                }
+                
+                const responseText = await response.text();
+                console.log('Dashboard raw response:', responseText);
+                
+                let data;
+                try {
+                    data = responseText ? JSON.parse(responseText) : {};
+                } catch (parseError) {
+                    console.error('Error parsing dashboard response:', parseError);
+                    throw new Error('Fehler beim Parsen der Server-Antwort');
+                }
+                
+                console.log('Dashboard data parsed:', data);
+                
+                // Stelle sicher, dass Werte immer als korrekte Typen vorhanden sind
+                return {
+                    total_properties: Number(data.total_properties) || 0,
+                    total_units: Number(data.total_units) || 0,
+                    monthly_rent: Number(data.monthly_rent) || 0,
+                    vacant_units: Array.isArray(data.vacant_units) ? data.vacant_units : [],
+                    active_workers: Number(data.active_workers) || 0
+                };
+            } catch (err) {
+                console.error('Dashboard fetch error:', err);
+                throw err;
             }
-            return await response.json();
         },
         {
             errorMessage: 'Fehler beim Laden der Dashboard-Daten',
-            autoExecute: true
+            autoExecute: true,
+            showErrorToast: true,
+            loadingTimeout: 20000 // 20 seconds timeout for loading state
         }
     );
 
-    if (isLoading) return <LoadingState />;
+    useEffect(() => {
+        if (error) {
+            console.error('Dashboard error occurred:', error);
+        }
+    }, [error]);
+    
+    // Stellen wir sicher, dass autoExecute korrekt funktioniert
+    useEffect(() => {
+        if (!stats && !isLoading && !error) {
+            console.log('Manually executing fetchDashboardStats');
+            fetchDashboardStats();
+        }
+    }, [stats, isLoading, error, fetchDashboardStats]);
+
+    if (isLoading) {
+        return <LoadingState />;
+    }
     
     if (error) {
         return (
             <ErrorState
                 title="Fehler beim Laden"
                 message="Die Dashboard-Daten konnten nicht geladen werden."
-                onRetry={fetchDashboardStats}
+                onRetry={() => {
+                    console.log('Retrying dashboard data fetch...');
+                    fetchDashboardStats();
+                }}
             />
         );
     }
@@ -1765,7 +1996,7 @@ export default function Dashboard() {
     return (
         <div className="p-4 space-y-6">
             {/* Übersichtskarten */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Immobilien</CardTitle>
@@ -1793,7 +2024,7 @@ export default function Dashboard() {
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">
-                            {stats.monthly_rent.toLocaleString('de-DE')} €
+                            {formatCurrency(stats.monthly_rent)}
                         </div>
                     </CardContent>
                 </Card>
@@ -1807,9 +2038,17 @@ export default function Dashboard() {
                         <div className="text-2xl font-bold">{stats.vacant_units.length}</div>
                     </CardContent>
                 </Card>
+
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Aktive Handwerker</CardTitle>
+                        <Wrench className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-2xl font-bold">{stats.active_workers}</div>
+                    </CardContent>
+                </Card>
             </div>
-
-
 
             {/* Leerstehende Einheiten */}
             <Card>
@@ -1817,28 +2056,32 @@ export default function Dashboard() {
                     <CardTitle>Leerstehende Einheiten</CardTitle>
                 </CardHeader>
                 <CardContent>
-                    <div className="relative overflow-x-auto">
-                        <table className="w-full text-sm text-left">
-                            <thead className="text-xs uppercase bg-muted">
-                                <tr>
-                                    <th className="px-6 py-3">Einheit</th>
-                                    <th className="px-6 py-3">Immobilie</th>
-                                    <th className="px-6 py-3">Typ</th>
-                                    <th className="px-6 py-3">Größe</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {stats.vacant_units.map((unit) => (
-                                    <tr key={unit.id} className="border-b">
-                                        <td className="px-6 py-4">{unit.name}</td>
-                                        <td className="px-6 py-4">{unit.property_address}</td>
-                                        <td className="px-6 py-4">{unit.type}</td>
-                                        <td className="px-6 py-4">{unit.size} m²</td>
+                    {stats.vacant_units && stats.vacant_units.length > 0 ? (
+                        <div className="relative overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="text-xs uppercase bg-muted">
+                                    <tr>
+                                        <th className="px-6 py-3">Einheit</th>
+                                        <th className="px-6 py-3">Immobilie</th>
+                                        <th className="px-6 py-3">Typ</th>
+                                        <th className="px-6 py-3">Größe</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
+                                </thead>
+                                <tbody>
+                                    {stats.vacant_units.map((unit) => (
+                                        <tr key={unit.id} className="border-b">
+                                            <td className="px-6 py-4">{unit.name}</td>
+                                            <td className="px-6 py-4">{unit.property_address}</td>
+                                            <td className="px-6 py-4">{unit.type}</td>
+                                            <td className="px-6 py-4">{unit.size} m²</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <p className="text-center text-muted-foreground py-4">Keine leerstehenden Einheiten vorhanden</p>
+                    )}
                 </CardContent>
             </Card>
         </div>
@@ -4177,6 +4420,7 @@ import { PropertyCard } from './PropertyCard';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { API } from '@/services/api';
 
 export default function PropertyList() {
   const navigate = useNavigate();
@@ -4186,7 +4430,8 @@ export default function PropertyList() {
   const { execute: fetchProperties, isLoading, error } = useAsync<Property[]>(
     () => PropertyService.getAll(),
     {
-      errorMessage: 'Fehler beim Laden der Immobilien'
+      errorMessage: 'Fehler beim Laden der Immobilien',
+      loadingTimeout: API.loadingStateTimeout
     }
   );
 
@@ -4198,12 +4443,16 @@ export default function PropertyList() {
   });
 
   useEffect(() => {
+    console.log('PropertyList mounted, loading properties');
     loadProperties();
   }, []);
 
   const loadProperties = async () => {
+    console.log('loadProperties called');
     try {
+      console.log('Executing fetchProperties');
       const data = await fetchProperties();
+      console.log('Properties loaded successfully:', data);
       setProperties(data);
     } catch (error) {
       console.error('Fehler beim Laden:', error);
@@ -4215,8 +4464,10 @@ export default function PropertyList() {
     if (!confirmed) return;
 
     try {
-      await PropertyService.delete(id);
-      await loadProperties();
+      const success = await PropertyService.deleteWithConfirm(id);
+      if (success) {
+        await loadProperties();
+      }
     } catch (error) {
       console.error('Fehler beim Löschen:', error);
     }
@@ -4626,6 +4877,11 @@ interface TenantFormProps {
   initialData?: Tenant;
 }
 
+// Erweiterte Unit-Schnittstelle mit property_address
+interface UnitWithPropertyAddress extends Unit {
+  property_address?: string;
+}
+
 const INITIAL_TENANT_DATA: TenantFormData = {
   first_name: '',
   last_name: '',
@@ -4639,7 +4895,7 @@ const INITIAL_TENANT_DATA: TenantFormData = {
 
 export default function TenantForm({ initialData }: TenantFormProps) {
   const navigate = useNavigate();
-  const [availableUnits, setAvailableUnits] = useState<Unit[]>([]);
+  const [availableUnits, setAvailableUnits] = useState<UnitWithPropertyAddress[]>([]);
   
   const {
     formData,
@@ -4755,10 +5011,23 @@ export default function TenantForm({ initialData }: TenantFormProps) {
     }
 
     try {
-      await saveTenant(formData);
+      // Ensure proper format for form data
+      const submissionData = {
+        ...formData,
+        // Convert string ID to number if present and not null
+        unit_id: formData.unit_id ? Number(formData.unit_id) : null,
+        active: true // Ensure active status is set
+      };
+
+      // Log submission data for debugging
+      console.log('Submitting tenant data:', submissionData);
+      
+      const result = await saveTenant(submissionData);
+      console.log('Tenant saved successfully:', result);
       navigate('/tenants');
     } catch (error) {
-      // Error wird bereits durch useAsync behandelt
+      console.error('Error during form submission:', error);
+      // Error already handled by useAsync
     }
   };
 
@@ -4961,6 +5230,7 @@ import { TenantCard } from '@/components/Mieter/TenantCard';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { API } from '@/services/api';
 
 export default function TenantList() {
   const navigate = useNavigate();
@@ -4970,7 +5240,8 @@ export default function TenantList() {
   const { execute: fetchTenants, isLoading, error } = useAsync<Tenant[]>(
     () => TenantService.getAll(),
     {
-      errorMessage: 'Fehler beim Laden der Mieter'
+      errorMessage: 'Fehler beim Laden der Mieter',
+      loadingTimeout: API.loadingStateTimeout
     }
   );
 
@@ -5591,21 +5862,47 @@ export default function WorkerForm({ initialData }: WorkerFormProps) {
     return isValid;
   };
 
-  // Form submission
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!validateForm()) {
-      return;
-    }
+ // src/components/Mitarbeiter/WorkerForm.tsx (Form submission part)
 
-    try {
-      await saveWorker(formData);
-      navigate('/workers');
-    } catch (error) {
-      // Error wird bereits durch useAsync behandelt
-    }
-  };
+// Replace the handleSubmit function in WorkerForm.tsx with this improved version:
+
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  
+  if (!validateForm()) {
+    return;
+  }
+
+  try {
+    // Format skills properly, ensuring each skill has proper numeric values
+    const formattedSkills = formData.skills.map(skill => ({
+      id: typeof skill.id === 'string' ? parseInt(skill.id) : Number(skill.id),
+      experience_years: typeof skill.experience_years === 'string' 
+        ? parseInt(skill.experience_years) 
+        : Number(skill.experience_years)
+    }));
+
+    // Create a clean submission object with proper types
+    const submissionData = {
+      ...formData,
+      hourly_rate: typeof formData.hourly_rate === 'string' 
+        ? parseFloat(formData.hourly_rate) 
+        : formData.hourly_rate,
+      skills: formattedSkills,
+      active: formData.active !== undefined ? formData.active : true
+    };
+
+    // Log submission data for debugging
+    console.log('Submitting worker data:', submissionData);
+    
+    const result = await saveWorker(submissionData);
+    console.log('Worker saved successfully:', result);
+    navigate('/workers');
+  } catch (error) {
+    console.error('Error during form submission:', error);
+    // Error already handled by useAsync
+  }
+};
 
   // Cancel handling
   const handleCancel = async () => {
@@ -5630,8 +5927,27 @@ export default function WorkerForm({ initialData }: WorkerFormProps) {
   const updateSkill = (index: number, field: keyof WorkerSkill, value: any) => {
     const newSkills = formData.skills.map((skill, i) => {
       if (i !== index) return skill;
+      
+      // Make sure we're handling skill IDs consistently
+      if (field === 'id') {
+        const skillId = typeof value === 'string' ? parseInt(value) : Number(value);
+        
+        // If we have a skill name in the available skills, include it
+        const selectedSkill = availableSkills.find(s => s.id === skillId);
+        if (selectedSkill) {
+          return { 
+            ...skill, 
+            id: skillId,
+            name: selectedSkill.name 
+          };
+        }
+        
+        return { ...skill, id: skillId };
+      }
+      
       return { ...skill, [field]: value };
     });
+    
     updateField('skills', newSkills);
   };
 
@@ -5865,6 +6181,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { API } from '@/services/api';
 
 export default function WorkerList() {
   const navigate = useNavigate();
@@ -5876,14 +6193,16 @@ export default function WorkerList() {
   const { execute: fetchWorkers, isLoading, error } = useAsync<Worker[]>(
     () => WorkerService.getAll(),
     {
-      errorMessage: 'Fehler beim Laden der Handwerker'
+      errorMessage: 'Fehler beim Laden der Handwerker',
+      loadingTimeout: API.loadingStateTimeout
     }
   );
 
   const { execute: fetchSkills } = useAsync(
     () => WorkerService.getSkills(),
     {
-      errorMessage: 'Fehler beim Laden der Fähigkeiten'
+      errorMessage: 'Fehler beim Laden der Fähigkeiten',
+      loadingTimeout: API.loadingStateTimeout
     }
   );
 
@@ -6024,7 +6343,7 @@ export default function WorkerList() {
 ```tsx
 // src/components/providers.tsx
 import * as React from "react"
-import { Toaster } from "@/components/ui/toaster"
+import { Toaster } from "@/components/ui/Toaster"
 import { TooltipProvider } from "@radix-ui/react-tooltip"
 
 interface ProvidersProps {
@@ -6598,13 +6917,31 @@ export { Input }
 
 ```tsx
 // src/components/ui/LoadingState.tsx
+import { useEffect, useState } from 'react';
+
 export function LoadingState() {
-    return (
-      <div className="w-full h-48 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-      </div>
-    );
-  }
+  const [showRetryMessage, setShowRetryMessage] = useState(false);
+  
+  useEffect(() => {
+    // After 10 seconds, show a message suggesting reload if still loading
+    const timeoutId = setTimeout(() => {
+      setShowRetryMessage(true);
+    }, 10000);
+    
+    return () => clearTimeout(timeoutId);
+  }, []);
+  
+  return (
+    <div className="w-full h-48 flex flex-col items-center justify-center gap-4">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      {showRetryMessage && (
+        <p className="text-sm text-muted-foreground">
+          Laden dauert länger als erwartet. Prüfen Sie Ihre Netzwerkverbindung oder laden Sie die Seite neu.
+        </p>
+      )}
+    </div>
+  );
+}
 ```
 
 # frontend/src/components/ui/select.tsx
@@ -6996,8 +7333,9 @@ export const DOCUMENT_TYPES = {
 // API Configuration
 export const API_CONFIG = {
   baseUrl: 'http://localhost:3001',
-  timeout: 5000,
+  timeout: 15000,  // Increased from 5000ms to 15000ms
   retryAttempts: 3,
+  loadingStateTimeout: 30000, // 30 seconds max for loading states
 } as const;
 
 // Table Configuration
@@ -7237,7 +7575,7 @@ export function useToast() {
 
 ```ts
 // src/hooks/useAsync.ts
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useToast } from './useToast';
 import { ApiError } from '@/types/common';
 
@@ -7248,41 +7586,94 @@ interface UseAsyncOptions {
   showErrorToast?: boolean;
   retryCount?: number;
   autoExecute?: boolean;
+  loadingTimeout?: number; // Timeout in ms after which loading state will be cleared
 }
 
 export function useAsync<T>(
   asyncFunction: (...args: any[]) => Promise<T>,
   options: UseAsyncOptions = {}
 ) {
-  const [isLoading, setIsLoading] = useState(options.autoExecute === true);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [data, setData] = useState<T | null>(null);
   const { toast } = useToast();
   
-  // Verwenden von useRef für die aktuelle Operation, um Race-Conditions zu vermeiden
-  const activeRequest = useRef<AbortController | null>(null);
+  // Keep track of auto-execute status
+  const didAutoExecute = useRef(false);
   
+  // Track component mount status to prevent state updates after unmount
+  const isMounted = useRef(true);
+  
+  // Track current request to allow cancellation
+  const activeRequest = useRef<AbortController | null>(null);
+  const attemptCount = useRef(0);
+
+  // Setup cleanup on component unmount
+  useEffect(() => {
+    console.log('useAsync hook initialized');
+    isMounted.current = true;
+    
+    return () => {
+      console.log('useAsync cleanup - component unmounting');
+      isMounted.current = false;
+      
+      if (activeRequest.current) {
+        console.log('Aborting active request on unmount');
+        activeRequest.current.abort();
+        activeRequest.current = null;
+      }
+    };
+  }, []);
+
   const execute = useCallback(
     async (...args: any[]): Promise<T> => {
-      // Abbrechen einer bereits laufenden Operation
+      // Safety check - don't start a new request if component is unmounted
+      if (!isMounted.current) {
+        console.log('Execute called but component is unmounted, skipping');
+        return Promise.reject(new Error('Component unmounted'));
+      }
+      
+      console.log('Execute called with loading state:', isLoading);
+      
+      // Cancel any in-progress requests
       if (activeRequest.current) {
+        console.log('Aborting previous request');
         activeRequest.current.abort();
       }
       
-      // Neue AbortController für diese Operation
+      // Create new abort controller for this request
       const controller = new AbortController();
       activeRequest.current = controller;
       
+      attemptCount.current += 1;
+      console.log(`Executing async operation (attempt ${attemptCount.current})`);
+      
+      // Set up loading timeout to prevent infinite loading state
+      let loadingTimeoutId: NodeJS.Timeout | null = null;
+      if (options.loadingTimeout) {
+        loadingTimeoutId = setTimeout(() => {
+          // Only update state if component is still mounted
+          if (isMounted.current && isLoading) {
+            console.warn(`Loading timeout reached after ${options.loadingTimeout}ms`);
+            setIsLoading(false);
+          }
+        }, options.loadingTimeout);
+      }
+      
+      // Update loading state at the beginning
+      setIsLoading(true);
+      console.log('Setting isLoading to true');
+      setError(null);
+      
       try {
-        setIsLoading(true);
-        setError(null);
-        
         const response = await asyncFunction(...args);
         
-        // Nur wenn diese Operation nicht abgebrochen wurde, Daten setzen
-        if (!controller.signal.aborted) {
+        // Only update state if this request wasn't aborted and component is mounted
+        if (!controller.signal.aborted && isMounted.current) {
+          console.log('Operation successful, setting data');
           setData(response);
           
+          // Show success toast if configured
           if (options.showSuccessToast !== false && options.successMessage) {
             toast({
               title: 'Erfolg',
@@ -7290,17 +7681,20 @@ export function useAsync<T>(
               duration: 3000,
             });
           }
+        } else {
+          console.log('Request completed but was either aborted or component unmounted');
         }
         
         return response;
       } catch (err) {
-        // Nur wenn diese Operation nicht abgebrochen wurde, Fehler setzen
-        if (!controller.signal.aborted) {
+        // Only update error state if request wasn't aborted and component is mounted
+        if (!controller.signal.aborted && isMounted.current) {
           console.error('Fehler in useAsync:', err);
           
           const error = err instanceof Error ? err : new Error('Ein Fehler ist aufgetreten');
           setError(error);
           
+          // Show error toast if configured
           if (options.showErrorToast !== false) {
             const errorMessage = err instanceof ApiError 
               ? err.message 
@@ -7313,35 +7707,69 @@ export function useAsync<T>(
               duration: 5000,
             });
           }
+          
+          // Auto-retry if configured and attempts not exhausted
+          const maxRetries = options.retryCount || 0;
+          if (maxRetries > 0 && attemptCount.current <= maxRetries) {
+            console.log(`Auto-retrying (${attemptCount.current}/${maxRetries})`);
+            setTimeout(() => execute(...args), 1000); // 1 second delay
+          }
+        } else {
+          console.log('Error occurred but request was aborted or component unmounted');
         }
         
         throw err;
       } finally {
-        // Nur wenn diese Operation nicht abgebrochen wurde, isLoading zurücksetzen
-        if (!controller.signal.aborted) {
+        // Clean up timeout
+        if (loadingTimeoutId) {
+          clearTimeout(loadingTimeoutId);
+        }
+        
+        // CRITICAL FIX: Always reset loading state if component is mounted
+        if (isMounted.current) {
+          console.log('Resetting loading state to false');
           setIsLoading(false);
-          activeRequest.current = null;
+          // Only clear activeRequest if this is the current request
+          if (activeRequest.current === controller) {
+            activeRequest.current = null;
+          }
+        } else {
+          console.log('Component unmounted, not updating state');
         }
       }
     },
-    [asyncFunction, options, toast]
+    [asyncFunction, options, toast, isLoading]
   );
 
-  // Auto-execute if the option is enabled
-  const didAutoExecute = useRef(false);
-  if (options.autoExecute && !didAutoExecute.current && !isLoading && !data && !error) {
-    didAutoExecute.current = true;
-    execute();
-  }
+  // Auto-execute if configured
+  useEffect(() => {
+    if (options.autoExecute && !didAutoExecute.current && !isLoading && !data && !error) {
+      console.log('Auto-executing function');
+      didAutoExecute.current = true;
+      execute().catch(err => {
+        if (err.message !== 'Component unmounted') {
+          console.error('Auto-execute error:', err);
+        }
+      });
+    }
+  }, [options.autoExecute, isLoading, data, error, execute]);
 
+  // Reset state
   const reset = useCallback(() => {
-    setData(null);
-    setError(null);
-    setIsLoading(false);
+    if (isMounted.current) {
+      setData(null);
+      setError(null);
+      setIsLoading(false);
+      attemptCount.current = 0;
+      console.log('State reset');
+    }
   }, []);
 
+  // Retry operation
   const retry = useCallback(async (...args: any[]) => {
-    if (isLoading) return;
+    if (isLoading || !isMounted.current) return;
+    console.log('Retrying operation');
+    attemptCount.current = 0;
     return execute(...args);
   }, [execute, isLoading]);
 
@@ -8043,6 +8471,8 @@ import { ApiError } from '@/types/common';
 export class API {
   private static baseUrl = API_CONFIG.baseUrl;
   private static timeout = API_CONFIG.timeout;
+  private static retryAttempts = API_CONFIG.retryAttempts || 0;
+  public static loadingStateTimeout = API_CONFIG.loadingStateTimeout || 30000;
 
   private static async request<T>(
     endpoint: string,
@@ -8053,10 +8483,13 @@ export class API {
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
+      console.log(`API Request: ${options.method || 'GET'} ${url}`);
+      
       const response = await fetch(url, {
         ...options,
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
           ...options.headers,
         },
         signal: controller.signal,
@@ -8064,31 +8497,48 @@ export class API {
 
       clearTimeout(timeoutId);
 
+      // Log raw response for debugging
+      console.log(`API Response Status: ${response.status}`);
+      
+      // Debug response content
+      const responseText = await response.text();
+      
       if (!response.ok) {
         let errorMessage = 'Ein Fehler ist aufgetreten';
         let errorData;
         
         try {
-          errorData = await response.json();
+          errorData = responseText ? JSON.parse(responseText) : {};
           errorMessage = errorData.error || errorMessage;
-        } catch {
-          // Falls keine JSON-Antwort verfügbar ist
+        } catch (parseError) {
+          console.error('Error parsing error response:', parseError);
+          // Keep default error message
         }
 
         throw new ApiError(errorMessage, response.status, errorData);
       }
 
       // For endpoints that return no content
-      if (response.status === 204) {
+      if (response.status === 204 || !responseText) {
         return {} as T;
       }
 
-      return response.json();
+      // Parse the response
+      try {
+        return JSON.parse(responseText) as T;
+      } catch (parseError) {
+        console.error('Error parsing success response:', parseError);
+        console.error('Raw response:', responseText);
+        throw new ApiError('Fehler beim Verarbeiten der Antwort', 500);
+      }
     } catch (error) {
       clearTimeout(timeoutId);
+      
       if (error instanceof ApiError) throw error;
       
       if (error instanceof Error) {
+        console.error('API request error:', error);
+        
         if (error.name === 'AbortError') {
           throw new ApiError('Die Anfrage wurde wegen Zeitüberschreitung abgebrochen', 408);
         }
@@ -8121,6 +8571,16 @@ export class API {
     return this.request(endpoint, {
       method: 'DELETE',
     });
+  }
+
+  static async deleteWithConfirm(endpoint: string): Promise<boolean> {
+    try {
+      await this.delete(endpoint);
+      return true;
+    } catch (error) {
+      console.error('Delete error:', error);
+      return false;
+    }
   }
 }
 ```
@@ -8236,6 +8696,10 @@ export class PropertyService {
   static async delete(id: number): Promise<void> {
     return API.delete(`${this.endpoint}/${id}`);
   }
+  
+  static async deleteWithConfirm(id: number): Promise<boolean> {
+    return API.deleteWithConfirm(`${this.endpoint}/${id}`);
+  }
 }
 
 ```
@@ -8263,7 +8727,13 @@ export class TenantService {
   }
 
   static async update(id: number, data: TenantFormData): Promise<Tenant> {
-    return API.put<Tenant>(`${this.endpoint}/${id}`, data);
+    // Make sure we're sending the active status which might be needed by the backend
+    const updatedData = {
+      ...data,
+      active: true, // Assume active for updates unless explicitly set otherwise
+    };
+    
+    return API.put<Tenant>(`${this.endpoint}/${id}`, updatedData);
   }
 
   static async delete(id: number): Promise<void> {
@@ -8277,7 +8747,7 @@ export class TenantService {
 ```ts
 // src/services/WorkerService.ts
 import { API } from './api';
-import { Worker, WorkerFormData } from '@/types/worker';
+import { Worker, WorkerFormData, WorkerSkill } from '@/types/worker';
 
 export class WorkerService {
   private static endpoint = '/workers';
@@ -8291,11 +8761,36 @@ export class WorkerService {
   }
 
   static async create(data: WorkerFormData): Promise<Worker> {
-    return API.post<Worker>(this.endpoint, data);
+    // Ensure all skills have the required properties
+    const formattedData = {
+      ...data,
+      hourly_rate: typeof data.hourly_rate === 'string' 
+        ? parseFloat(data.hourly_rate) 
+        : data.hourly_rate,
+      skills: data.skills.map(skill => ({
+        id: typeof skill.id === 'string' ? parseInt(skill.id) : skill.id,
+        experience_years: skill.experience_years
+      }))
+    };
+    
+    return API.post<Worker>(this.endpoint, formattedData);
   }
 
   static async update(id: number, data: WorkerFormData): Promise<Worker> {
-    return API.put<Worker>(`${this.endpoint}/${id}`, data);
+    // Ensure all skills have the required properties and proper types
+    const formattedData = {
+      ...data,
+      hourly_rate: typeof data.hourly_rate === 'string' 
+        ? parseFloat(data.hourly_rate) 
+        : data.hourly_rate,
+      skills: data.skills.map(skill => ({
+        id: typeof skill.id === 'string' ? parseInt(skill.id) : skill.id,
+        experience_years: skill.experience_years
+      })),
+      active: data.active !== undefined ? data.active : true, // Default to active if not specified
+    };
+    
+    return API.put<Worker>(`${this.endpoint}/${id}`, formattedData);
   }
 
   static async delete(id: number): Promise<void> {
@@ -8322,6 +8817,9 @@ export class ApiError extends Error {
     this.name = 'ApiError';
     this.status = status;
     this.data = data;
+    
+    // Damit instanceof auch mit transpiliertem Code funktioniert
+    Object.setPrototypeOf(this, ApiError.prototype);
   }
 }
 
@@ -8351,29 +8849,6 @@ export type BaseEntity = {
   id: number;
   created_at: string;
   updated_at: string;
-};
-
-export type SelectOption = {
-  label: string;
-  value: string | number;
-  disabled?: boolean;
-};
-
-export type FormField = {
-  name: string;
-  label: string;
-  type: 'text' | 'number' | 'email' | 'password' | 'select' | 'date' | 'textarea';
-  required?: boolean;
-  placeholder?: string;
-  options?: SelectOption[];
-  validation?: {
-    min?: number;
-    max?: number;
-    minLength?: number;
-    maxLength?: number;
-    pattern?: RegExp;
-    customValidation?: (value: any) => string | undefined;
-  };
 };
 ```
 
@@ -8456,10 +8931,16 @@ export interface Tenant extends BaseEntity {
   email: string;
   phone: string;
   address: string;
-  unit_id?: number;
+  unit_id: number | null;
   rent_start_date: string;
-  rent_end_date?: string;
+  rent_end_date: string | null;
   active: boolean;
+  
+  // Include these fields that are returned from the API
+  unit_name?: string;
+  unit_type?: string;
+  property_address?: string;
+  property_type?: string;
 }
 
 export interface TenantFormData {
@@ -8468,9 +8949,10 @@ export interface TenantFormData {
   email: string;
   phone: string;
   address: string;
-  unit_id?: number | null;
+  unit_id: number | null | string; // Accept string for form select handling
   rent_start_date: string;
-  rent_end_date?: string | null;
+  rent_end_date: string | null;
+  active?: boolean; // Allow undefined in form but add in service
 }
 ```
 
@@ -8507,9 +8989,9 @@ export interface WorkerFormData {
   last_name: string;
   phone: string;
   email: string;
-  hourly_rate: number | string;
+  hourly_rate: number | string; // Accept both types for form handling flexibility
   skills: WorkerSkill[];
-  active?: boolean;
+  active: boolean; // Make sure this is required
 }
 ```
 

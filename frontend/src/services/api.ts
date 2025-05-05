@@ -5,6 +5,8 @@ import { ApiError } from '@/types/common';
 export class API {
   private static baseUrl = API_CONFIG.baseUrl;
   private static timeout = API_CONFIG.timeout;
+  private static retryAttempts = API_CONFIG.retryAttempts || 0;
+  public static loadingStateTimeout = API_CONFIG.loadingStateTimeout || 30000;
 
   private static async request<T>(
     endpoint: string,
@@ -15,10 +17,13 @@ export class API {
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
+      console.log(`API Request: ${options.method || 'GET'} ${url}`);
+      
       const response = await fetch(url, {
         ...options,
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
           ...options.headers,
         },
         signal: controller.signal,
@@ -26,31 +31,48 @@ export class API {
 
       clearTimeout(timeoutId);
 
+      // Log raw response for debugging
+      console.log(`API Response Status: ${response.status}`);
+      
+      // Debug response content
+      const responseText = await response.text();
+      
       if (!response.ok) {
         let errorMessage = 'Ein Fehler ist aufgetreten';
         let errorData;
         
         try {
-          errorData = await response.json();
+          errorData = responseText ? JSON.parse(responseText) : {};
           errorMessage = errorData.error || errorMessage;
-        } catch {
-          // Falls keine JSON-Antwort verfügbar ist
+        } catch (parseError) {
+          console.error('Error parsing error response:', parseError);
+          // Keep default error message
         }
 
         throw new ApiError(errorMessage, response.status, errorData);
       }
 
       // For endpoints that return no content
-      if (response.status === 204) {
+      if (response.status === 204 || !responseText) {
         return {} as T;
       }
 
-      return response.json();
+      // Parse the response
+      try {
+        return JSON.parse(responseText) as T;
+      } catch (parseError) {
+        console.error('Error parsing success response:', parseError);
+        console.error('Raw response:', responseText);
+        throw new ApiError('Fehler beim Verarbeiten der Antwort', 500);
+      }
     } catch (error) {
       clearTimeout(timeoutId);
+      
       if (error instanceof ApiError) throw error;
       
       if (error instanceof Error) {
+        console.error('API request error:', error);
+        
         if (error.name === 'AbortError') {
           throw new ApiError('Die Anfrage wurde wegen Zeitüberschreitung abgebrochen', 408);
         }
@@ -83,5 +105,15 @@ export class API {
     return this.request(endpoint, {
       method: 'DELETE',
     });
+  }
+
+  static async deleteWithConfirm(endpoint: string): Promise<boolean> {
+    try {
+      await this.delete(endpoint);
+      return true;
+    } catch (error) {
+      console.error('Delete error:', error);
+      return false;
+    }
   }
 }

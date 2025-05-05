@@ -24,6 +24,11 @@ interface TenantFormProps {
   initialData?: Tenant;
 }
 
+// Erweiterte Unit-Schnittstelle mit property_address
+interface UnitWithPropertyAddress extends Unit {
+  property_address?: string;
+}
+
 const INITIAL_TENANT_DATA: TenantFormData = {
   first_name: '',
   last_name: '',
@@ -37,7 +42,7 @@ const INITIAL_TENANT_DATA: TenantFormData = {
 
 export default function TenantForm({ initialData }: TenantFormProps) {
   const navigate = useNavigate();
-  const [availableUnits, setAvailableUnits] = useState<Unit[]>([]);
+  const [availableUnits, setAvailableUnits] = useState<UnitWithPropertyAddress[]>([]);
   
   const {
     formData,
@@ -153,10 +158,23 @@ export default function TenantForm({ initialData }: TenantFormProps) {
     }
 
     try {
-      await saveTenant(formData);
+      // Ensure proper format for form data
+      const submissionData = {
+        ...formData,
+        // Convert string ID to number if present and not null
+        unit_id: formData.unit_id ? Number(formData.unit_id) : null,
+        active: true // Ensure active status is set
+      };
+
+      // Log submission data for debugging
+      console.log('Submitting tenant data:', submissionData);
+      
+      const result = await saveTenant(submissionData);
+      console.log('Tenant saved successfully:', result);
       navigate('/tenants');
     } catch (error) {
-      // Error wird bereits durch useAsync behandelt
+      console.error('Error during form submission:', error);
+      // Error already handled by useAsync
     }
   };
 
